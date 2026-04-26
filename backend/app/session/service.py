@@ -1,0 +1,44 @@
+from sqlalchemy.orm import Session
+
+from app.session.models import ChatSession
+
+
+def build_session_title(user_message: str) -> str:
+    compact = " ".join((user_message or "").strip().split())
+    if not compact:
+        return "新会话"
+    return compact[:24]
+
+
+def get_session(db: Session, session_id: str) -> ChatSession | None:
+    return db.query(ChatSession).filter(ChatSession.id == session_id).first()
+
+
+def get_or_create_session(
+    db: Session,
+    session_id: str,
+    member_id: int,
+    user_message: str,
+    session_type: str = "group_chat",
+) -> ChatSession:
+    existing = get_session(db, session_id)
+    if existing:
+        return existing
+
+    session = ChatSession(
+        id=session_id,
+        title=build_session_title(user_message),
+        member_id=member_id,
+        session_type=session_type,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def list_sessions(db: Session, member_id: int, session_type: str | None = None) -> list[ChatSession]:
+    query = db.query(ChatSession).filter(ChatSession.member_id == member_id)
+    if session_type:
+        query = query.filter(ChatSession.session_type == session_type)
+    return query.order_by(ChatSession.create_at.desc()).all()
