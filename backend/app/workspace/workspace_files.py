@@ -3,12 +3,13 @@ from pathlib import Path
 from fastapi import APIRouter, Query
 
 from app.config import _BACKEND_ROOT
+from app.schemas import ApiResponse, success_response
 
 
 router = APIRouter(prefix="/chat_window")
 
 
-@router.get("/workspace_files")
+@router.get("/workspace_files", response_model=ApiResponse[list[dict]])
 def list_workspace_files(
     member_id: int = Query(..., description="成员ID"),
     session_id: str = Query(..., description="会话ID"),
@@ -16,7 +17,7 @@ def list_workspace_files(
     """列出某会话工作空间下的产物文件"""
     workspace_root = _BACKEND_ROOT / "workspace" / str(member_id) / str(session_id)
     if not workspace_root.exists() or not workspace_root.is_dir():
-        return {"files": []}
+        return success_response([])
 
     files: list[dict] = []
     for file_path in workspace_root.rglob("*"):
@@ -36,4 +37,4 @@ def list_workspace_files(
         )
 
     files.sort(key=lambda item: item["modified_at"], reverse=True)
-    return {"files": files}
+    return success_response(files)

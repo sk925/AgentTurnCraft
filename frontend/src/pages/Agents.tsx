@@ -5,6 +5,7 @@ import { agentsApi, skillsApi } from '../api';
 import type { Agent, Skill } from '../api';
 
 export default function AgentsPage() {
+  const userId = 1;
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
@@ -15,7 +16,7 @@ export default function AgentsPage() {
   const fetchAgents = async () => {
     setLoading(true);
     try {
-      const data = await agentsApi.getAll();
+      const data = await agentsApi.getAll(userId);
       setAgents(data);
     } catch (error) {
       message.error('获取智能体列表失败');
@@ -26,7 +27,7 @@ export default function AgentsPage() {
 
   const fetchSkills = async () => {
     try {
-      const data = await skillsApi.getAll();
+      const data = await skillsApi.getAll(userId);
       setSkills(data);
     } catch (error) {
       console.error('获取技能列表失败', error);
@@ -41,10 +42,10 @@ export default function AgentsPage() {
   const handleSubmit = async (values: any) => {
     try {
       if (editingAgent) {
-        await agentsApi.update(editingAgent.id, values);
+        await agentsApi.update(userId, editingAgent.id, values);
         message.success('编辑成功');
       } else {
-        await agentsApi.create(values);
+        await agentsApi.create(userId, values);
         message.success('添加成功');
       }
       setModalVisible(false);
@@ -58,7 +59,7 @@ export default function AgentsPage() {
 
   const handleDelete = async (id: number) => {
     try {
-      await agentsApi.delete(id);
+      await agentsApi.delete(userId, id);
       message.success('删除成功');
       fetchAgents();
     } catch (error) {
@@ -68,7 +69,7 @@ export default function AgentsPage() {
 
   const handleAddSkill = async (agentId: number, skillId: number) => {
     try {
-      await agentsApi.addSkill(agentId, skillId);
+      await agentsApi.addSkill(userId, agentId, skillId);
       message.success('关联成功');
       fetchAgents();
     } catch (error) {
@@ -78,7 +79,7 @@ export default function AgentsPage() {
 
   const handleRemoveSkill = async (agentId: number, skillId: number) => {
     try {
-      await agentsApi.removeSkill(agentId, skillId);
+      await agentsApi.removeSkill(userId, agentId, skillId);
       message.success('解除关联成功');
       fetchAgents();
     } catch (error) {

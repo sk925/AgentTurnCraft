@@ -1,6 +1,7 @@
+from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
 from app.config import settings
 
@@ -20,5 +21,30 @@ def get_db():
         db.close()
 
 
+SessionFactory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+safe_session = scoped_session(SessionFactory)
+@contextmanager
+def transactional_session() -> Session:
+    """
+    统一事务封装：
+    - 成功自动 commit
+    - 异常自动 rollback
+    - 始终关闭并清理 scoped session
+    """
+    session: Session = safe_session()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+        safe_session.remove()
+
+        
 def init_db():
     Base.metadata.create_all(bind=engine)
+
+
+

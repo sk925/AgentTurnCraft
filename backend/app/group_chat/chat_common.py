@@ -6,13 +6,11 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 
-# class AgentData(BaseModel):
-#     """智能体数据"""
-#     id: int
-#     name: str
-#     description: str
-#     prompt: str
-#     model_config = {"from_attributes": True}
+class SessionType(str, Enum):
+    """会话类型"""
+    GROUP_CHAT = "group"
+    PPT = "ppt"
+    CHAT = "chat"
 
 
 class RoleType(str, Enum):
@@ -25,10 +23,10 @@ class RoleType(str, Enum):
 
 class MsgType(str, Enum):
     """消息类型"""
-    USER = "user",
-    MODEL = "model",
-    TOOL_CALL = "tool_call",
-    TOOL_RESULT = "tool_result",
+    USER = "user"
+    MODEL = "model"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
 
 
 class InnerNode(str, Enum):
@@ -40,8 +38,8 @@ class InnerNode(str, Enum):
 
 class ChatRecord(TypedDict):
     """对话消息"""
-    role_type: RoleType
-    message_type: MsgType | None
+    role_type: str
+    message_type: str | None
     message_content: str
     speaker_id: int | None
     speaker_name: str | None

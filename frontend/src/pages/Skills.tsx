@@ -5,6 +5,7 @@ import { skillsApi } from '../api';
 import type { Skill } from '../api';
 
 export default function SkillsPage() {
+  const userId = 1;
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -12,7 +13,7 @@ export default function SkillsPage() {
   const fetchSkills = async () => {
     setLoading(true);
     try {
-      const data = await skillsApi.getAll();
+      const data = await skillsApi.getAll(userId);
       setSkills(data);
     } catch (error) {
       message.error('获取技能列表失败');
@@ -27,7 +28,7 @@ export default function SkillsPage() {
 
   const handleUpload = async (file: File) => {
     try {
-      await skillsApi.upload(file);
+      await skillsApi.upload(userId, file);
       message.success('上传成功');
       setUploadModalVisible(false);
       fetchSkills();
@@ -39,7 +40,7 @@ export default function SkillsPage() {
 
   const handleDelete = async (id: number) => {
     try {
-      await skillsApi.delete(id);
+      await skillsApi.delete(userId, id);
       message.success('删除成功');
       fetchSkills();
     } catch (error: any) {

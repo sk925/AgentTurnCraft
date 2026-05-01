@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.group_chat.chat_common import SessionType
 from app.session.models import ChatSession
 
 
@@ -19,7 +20,7 @@ def get_or_create_session(
     session_id: str,
     member_id: int,
     user_message: str,
-    session_type: str = "group_chat",
+    session_type: str = SessionType.CHAT.value,
 ) -> ChatSession:
     existing = get_session(db, session_id)
     if existing:
@@ -40,5 +41,10 @@ def get_or_create_session(
 def list_sessions(db: Session, member_id: int, session_type: str | None = None) -> list[ChatSession]:
     query = db.query(ChatSession).filter(ChatSession.member_id == member_id)
     if session_type:
-        query = query.filter(ChatSession.session_type == session_type)
+        normalized = session_type
+        if session_type == SessionType.GROUP_CHAT.value:
+            # 兼容历史写入值 group_chat
+            query = query.filter(ChatSession.session_type.in_([SessionType.GROUP_CHAT.value, "group_chat"]))
+            return query.order_by(ChatSession.create_at.desc()).all()
+        query = query.filter(ChatSession.session_type == normalized)
     return query.order_by(ChatSession.create_at.desc()).all()

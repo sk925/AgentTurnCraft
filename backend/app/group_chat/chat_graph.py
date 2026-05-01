@@ -1,5 +1,4 @@
 import time
-from app.config import checkpointer
 from app.group_chat.agent_selector import GroupSelection, select_agent
 from app.group_chat.chat_common import ChatRecord, MsgType, RoleType, WindowState
 from app.group_chat.speaker import speak_agent, stream_messages, stream_updates
@@ -12,7 +11,7 @@ from langgraph.config import get_stream_writer
 
 
 
-def build_graph() -> CompiledStateGraph:
+def build_graph(checkpointer) -> CompiledStateGraph:
     """创建群聊工作流"""
 
     def select_agents_node(window_state: WindowState):
@@ -25,26 +24,27 @@ def build_graph() -> CompiledStateGraph:
         # 用户本次提问
         chat_messages.append(
             ChatRecord(
-                role_type=RoleType.USER,
-                message_type=MsgType.USER,
+                role_type=RoleType.USER.value,
+                message_type=MsgType.USER.value,
                 message_content=window_state.get("user_message", ""),
             )
         )
         # 追加筛选可用智能体消息
         chat_messages.append(
             ChatRecord(
-                role_type=RoleType.AGENT_SELECTOR,
-                message_type=MsgType.MODEL,
+                role_type=RoleType.AGENT_SELECTOR.value,
+                message_type=MsgType.MODEL.value,
                 message_content=group_selection.model_dump_json(ensure_ascii=False)
             )
         )
+
         
         selected_agent_ids = group_selection.selected_agent_ids
         if not selected_agent_ids:
             chat_messages.append(
                 ChatRecord(
-                    role_type=RoleType.ASSISTANT,
-                    message_type=MsgType.MODEL,
+                    role_type=RoleType.ASSISTANT.value,
+                    message_type=MsgType.MODEL.value,
                     message_content=group_selection.answer
                 )
             )
@@ -119,20 +119,27 @@ def build_graph() -> CompiledStateGraph:
             },
         )
 
-    def speak_node(window_state: WindowState):
+    async def speak_node(window_state: WindowState):
         """发言人发言"""
         current_speaker = window_state.get("current_speaker", {})
         try:
             parent_stream_writer = get_stream_writer()
         except RuntimeError:
             parent_stream_writer = None
-        compiled_graph = speak_agent(window_state)
-        stream_input = {"messages": [{"role": "user", "content": "请你发言"}]}
+        compiled_graph = speak_agent(window_state, checkpointer)
+        stream_input = {"messages": [{"role": "user", "content": "根据上下文回答用户问题或执行任务或进行讨论"}]}
         config = {
             "configurable": {
                 "thread_id": f"{window_state.get('session_id', 0)}_{current_speaker.get('id', 0)}"
             }
         }
+        # 先按角色过滤（仅用户/发言人），再取最近 6 条
+        history_messages = window_state.get("session_messages", [])
+        history_messages = [
+            m
+            for m in history_messages
+            if m.get("role_type") in {RoleType.USER.value, RoleType.SPEAKER.value, RoleType.USER, RoleType.SPEAKER}
+        ][-6:]
         context = {
             "user_message": window_state.get("user_message", ""),
             "session_id": window_state.get("session_id"),
@@ -140,11 +147,12 @@ def build_graph() -> CompiledStateGraph:
             "user_profile": window_state.get("user_profile", {}),
             "transcript": window_state.get("transcript", []),
             "speaker_id": current_speaker.get("id"),
+            "history_messages": history_messages,
         }
 
         last_updates = None
-        last_message = None
-        for mode, data in compiled_graph.stream(
+
+        async for mode, data in compiled_graph.astream(
             stream_input,
             config=config,
             stream_mode=["messages", "updates"],
@@ -154,9 +162,11 @@ def build_graph() -> CompiledStateGraph:
             if mode == "updates":
                 if data.get("model"):
                     last_updates = data
-                stream_updates(data,parent_stream_writer,current_speaker)    
+                await stream_updates(data,parent_stream_writer,current_speaker, window_state)    
             elif mode == "messages":
                 stream_messages(data,parent_stream_writer,current_speaker)
+
+                
 
         transcript = window_state.get("transcript", [])
         transcript.append(
@@ -171,8 +181,8 @@ def build_graph() -> CompiledStateGraph:
         chat_messages: list[ChatRecord] = window_state.get("session_messages", [])
         chat_messages.append(
             ChatRecord(
-                role_type=RoleType.SPEAKER,
-                message_type=MsgType.MODEL,
+                role_type=RoleType.SPEAKER.value,
+                message_type=MsgType.MODEL.value,
                 message_content=last_updates.get("model").get("messages")[0].content,
                 speaker_id=current_speaker.get("id", ""),
                 speaker_name=current_speaker.get("name", ""),
@@ -196,10 +206,13 @@ def build_graph() -> CompiledStateGraph:
 
 
 _WINDOW_GRAPH: CompiledStateGraph | None = None
+_WINDOW_GRAPH_CHECKPOINTER_ID: int | None = None
 
 
-def get_window_graph() -> CompiledStateGraph:
-    global _WINDOW_GRAPH
-    if _WINDOW_GRAPH is None:
-        _WINDOW_GRAPH = build_graph()
+def get_window_graph(checkpointer) -> CompiledStateGraph:
+    global _WINDOW_GRAPH, _WINDOW_GRAPH_CHECKPOINTER_ID
+    checkpointer_id = id(checkpointer)
+    if _WINDOW_GRAPH is None or _WINDOW_GRAPH_CHECKPOINTER_ID != checkpointer_id:
+        _WINDOW_GRAPH = build_graph(checkpointer)
+        _WINDOW_GRAPH_CHECKPOINTER_ID = checkpointer_id
     return _WINDOW_GRAPH

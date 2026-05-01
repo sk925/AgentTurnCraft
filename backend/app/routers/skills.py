@@ -7,20 +7,21 @@ import shutil
 
 from app.database import get_db
 from app.models import Skill
-from app.schemas import SkillResponse
+from app.schemas import ApiResponse, SkillResponse, success_response
 
 router = APIRouter()
 
 
-@router.get("/skills", response_model=List[SkillResponse])
-def get_skills(db: Session = Depends(get_db)):
+@router.get("/skills", response_model=ApiResponse[List[SkillResponse]])
+def get_skills(user_id: int, db: Session = Depends(get_db)):
     """获取技能列表"""
-    skills = db.query(Skill).all()
-    return skills
+    skills = db.query(Skill).filter(Skill.user_id == user_id).all()
+    return success_response(skills)
 
 
-@router.post("/skills", response_model=SkillResponse)
+@router.post("/skills", response_model=ApiResponse[SkillResponse])
 async def upload_skill(
+    user_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -58,6 +59,7 @@ async def upload_skill(
                     break
 
     skill = Skill(
+        user_id=user_id,
         name=name,
         description=description,
         file_path=extract_dir
@@ -66,13 +68,13 @@ async def upload_skill(
     db.commit()
     db.refresh(skill)
 
-    return skill
+    return success_response(skill)
 
 
 @router.delete("/skills/{skill_id}")
-def delete_skill(skill_id: int, db: Session = Depends(get_db)):
+def delete_skill(skill_id: int, user_id: int, db: Session = Depends(get_db)):
     """删除技能"""
-    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.user_id == user_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="技能不存在")
 
@@ -85,4 +87,4 @@ def delete_skill(skill_id: int, db: Session = Depends(get_db)):
     db.delete(skill)
     db.commit()
 
-    return {"message": "删除成功"}
+    return success_response({"deleted": True}, message="删除成功")

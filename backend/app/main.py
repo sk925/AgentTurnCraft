@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
 
 from app.group_chat import chat_window
+from app.config import settings
+from app.schemas import ApiResponse, success_response
 from app.session import router as session_router
 from app.workspace import workspace_files
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.database import init_db
 from app.routers import agents, skills
@@ -13,7 +16,15 @@ from app.routers import agents, skills
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.database_url)
+    checkpointer = await checkpointer_cm.__aenter__()
+    await checkpointer.setup()
+    app.state.checkpointer = checkpointer
+    app.state.checkpointer_cm = checkpointer_cm
+    try:
+        yield
+    finally:
+        await checkpointer_cm.__aexit__(None, None, None)
 
 
 app = FastAPI(title="智能体管理后台", version="0.1.0", lifespan=lifespan)
@@ -35,9 +46,9 @@ app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files
 app.include_router(session_router, prefix="/api", tags=["sessions"])
 
 
-@app.get("/")
+@app.get("/", response_model=ApiResponse[dict])
 def root():
-    return {"message": "智能体管理后台 API"}
+    return success_response({"name": "智能体管理后台 API"})
 
 
 if __name__ == "__main__":

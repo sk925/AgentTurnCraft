@@ -1,10 +1,10 @@
 import json
-from app.group_chat.chat_common import SpearkerRecord, WindowState
+from app.group_chat.chat_common import SessionType, SpearkerRecord, WindowState
 from app.group_chat.chat_graph import get_window_graph
 from app.models import Agent
 from app.session.service import get_or_create_session
 from app.utils import snowflake
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -21,12 +21,15 @@ class WindowChatRequest(BaseModel):
     member_id: int
     session_id: str | None
     round_id: str | None
+    session_type: SessionType = SessionType.CHAT
 
     
-window_graph: CompiledStateGraph = get_window_graph()
-
 @router.post("/chat")
-def window_chat(window_chat_request: WindowChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def window_chat(
+    window_chat_request: WindowChatRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
 
     session_id = window_chat_request.session_id
     if not session_id:
@@ -36,7 +39,7 @@ def window_chat(window_chat_request: WindowChatRequest, db: Session = Depends(ge
         session_id=session_id,
         member_id=window_chat_request.member_id,
         user_message=window_chat_request.user_message,
-        session_type="group_chat",
+        session_type=window_chat_request.session_type.value,
     )
 
 
@@ -45,7 +48,7 @@ def window_chat(window_chat_request: WindowChatRequest, db: Session = Depends(ge
     
 
     #查询所有可用智能体
-    all_agents = db.query(Agent).all()
+    all_agents = db.query(Agent).filter(Agent.user_id == window_chat_request.member_id).all()
     all_agents_data = [
         {
             "id": agent.id,
@@ -63,15 +66,16 @@ def window_chat(window_chat_request: WindowChatRequest, db: Session = Depends(ge
                   "all_agents": all_agents_data,
                   "user_profile":{"member_id": window_chat_request.member_id, "org_id": window_chat_request.org_id, "member_role": "STUDENT"}
                   }
+    window_graph: CompiledStateGraph = get_window_graph(request.app.state.checkpointer)
     
-    return StreamingResponse(event_stream(window_state, config), media_type="text/event-stream")
+    return StreamingResponse(event_stream(window_graph, window_state, config), media_type="text/event-stream")
 
 
-def event_stream(window_state:dict, config:dict):
+async def event_stream(window_graph: CompiledStateGraph, window_state: dict, config: dict):
 
     yield send_messages("start",{"session_id": str(window_state.get("session_id")), "round_id": str(window_state.get("round_id"))})
 
-    for chunk in window_graph.stream(
+    async for chunk in window_graph.astream(
         window_state, config=config, stream_mode=["messages", "updates", "custom"]
     ):
         # 兼容 (mode, data) 与 (namespace, mode, data)
@@ -91,6 +95,19 @@ def event_stream(window_state:dict, config:dict):
                 msg = send_select_speaker_node(data.get("select_speaker_node"))
                 if msg:
                     yield msg
+            if data.get("speak_node"):
+                speak_data = data.get("speak_node")
+                msg = send_speaker_node(speak_data)
+                if msg:
+                    yield msg
+                if speak_data.get("finished", False):
+                    yield send_messages(
+                        "speaker_finished",
+                        {
+                            "answer": speak_data.get("answer", ""),
+                            "finish_reason": speak_data.get("finish_reason", ""),
+                        },
+                    )
         elif mode == "custom":
             # speak_node 内通过 get_stream_writer 转发的发言流式增量
             yield send_messages(data=data)

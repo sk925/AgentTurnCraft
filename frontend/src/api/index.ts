@@ -4,6 +4,36 @@ const api = axios.create({
   baseURL: 'http://localhost:8000/api',
 });
 
+const USER_SERVICE_BASE_URL = 'http://localhost:8001/api';
+const USER_SERVICE_TOKEN_KEY = 'user_service_access_token';
+
+interface ApiResponse<T> {
+  code: number;
+  message: string;
+  data: T;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+}
+
+export function getUserServiceToken(): string | null {
+  return localStorage.getItem(USER_SERVICE_TOKEN_KEY);
+}
+
+export function setUserServiceToken(token: string): void {
+  localStorage.setItem(USER_SERVICE_TOKEN_KEY, token);
+}
+
+export function clearUserServiceToken(): void {
+  localStorage.removeItem(USER_SERVICE_TOKEN_KEY);
+}
+
+function ensureArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 export interface Skill {
   id: number;
   name: string;
@@ -27,7 +57,10 @@ export interface ChatWindowRequest {
   member_id: number;
   session_id?: string | null;
   round_id?: string | null;
+  session_type?: SessionType;
 }
+
+export type SessionType = 'group' | 'ppt' | 'chat';
 
 export interface WorkspaceArtifactFile {
   name: string;
@@ -43,7 +76,7 @@ export interface ChatSession {
   member_id: number;
   create_at: string;
   token_use: number | null;
-  session_type: string;
+  session_type: SessionType | string;
 }
 
 export interface SessionMessage {
@@ -63,6 +96,12 @@ export interface ChatStartEvent {
 export interface ChatFinishedEvent {
   event: 'finished';
   answer: string;
+  finish_reason?: string;
+}
+
+export interface ChatSpeakerFinishedEvent {
+  event: 'speaker_finished';
+  answer?: string;
   finish_reason?: string;
 }
 
@@ -110,6 +149,7 @@ export interface ChatSpeakerModelStreamEvent {
 export type ChatWindowEvent =
   | ChatStartEvent
   | ChatFinishedEvent
+  | ChatSpeakerFinishedEvent
   | ChatCreateGroupEvent
   | ChatSelectSpeakerEvent
   | ChatSpeakerEvent
@@ -145,29 +185,35 @@ function parseSSEChunk(chunk: string): ChatWindowEvent[] {
 }
 
 export const skillsApi = {
-  getAll: () => api.get<Skill[]>('/skills').then(res => res.data),
-  upload: (file: File) => {
+  getAll: (userId: number) =>
+    api
+      .get<ApiResponse<Skill[]>>('/skills', { params: { user_id: userId } })
+      .then((res) => ensureArray<Skill>(res.data?.data)),
+  upload: (userId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post<Skill>('/skills', formData, {
+    return api.post<ApiResponse<Skill>>('/skills', formData, {
+      params: { user_id: userId },
       headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(res => res.data);
+    }).then((res) => res.data.data);
   },
-  delete: (id: number) => api.delete(`/skills/${id}`),
+  delete: (userId: number, id: number) => api.delete(`/skills/${id}`, { params: { user_id: userId } }),
 };
 
 export const agentsApi = {
-  getAll: () => api.get<Agent[]>('/agents').then(res => res.data),
-  create: (data: { name: string; description?: string; prompt?: string }) =>
-    api.post<Agent>('/agents', data).then(res => res.data),
-  update: (id: number, data: { name?: string; description?: string; prompt?: string }) =>
-    api.put<Agent>(`/agents/${id}`, data).then(res => res.data),
-  delete: (id: number) => api.delete(`/agents/${id}`),
-  addSkill: (agentId: number, skillId: number) =>
-    api.post(`/agents/${agentId}/skills/${skillId}`),
-  removeSkill: (agentId: number, skillId: number) =>
-    api.delete(`/agents/${agentId}/skills/${skillId}`),
-  getWithSkills: (id: number) => api.get<Agent>(`/agents/${id}`).then(res => res.data),
+  getAll: (userId: number) =>
+    api.get<ApiResponse<Agent[]>>('/agents', { params: { user_id: userId } }).then((res) => ensureArray<Agent>(res.data?.data)),
+  create: (userId: number, data: { name: string; description?: string; prompt?: string }) =>
+    api.post<ApiResponse<Agent>>('/agents', data, { params: { user_id: userId } }).then((res) => res.data.data),
+  update: (userId: number, id: number, data: { name?: string; description?: string; prompt?: string }) =>
+    api.put<ApiResponse<Agent>>(`/agents/${id}`, data, { params: { user_id: userId } }).then((res) => res.data.data),
+  delete: (userId: number, id: number) => api.delete(`/agents/${id}`, { params: { user_id: userId } }),
+  addSkill: (userId: number, agentId: number, skillId: number) =>
+    api.post(`/agents/${agentId}/skills/${skillId}`, null, { params: { user_id: userId } }),
+  removeSkill: (userId: number, agentId: number, skillId: number) =>
+    api.delete(`/agents/${agentId}/skills/${skillId}`, { params: { user_id: userId } }),
+  getWithSkills: (userId: number, id: number) =>
+    api.get<ApiResponse<Agent>>(`/agents/${id}`, { params: { user_id: userId } }).then((res) => res.data.data),
 };
 
 export const chatWindowApi = {
@@ -213,26 +259,31 @@ export const chatWindowApi = {
   },
   getWorkspaceFiles: async (memberId: number, sessionId: string) => {
     return api
-      .get<{ files: WorkspaceArtifactFile[] }>('/chat_window/workspace_files', {
+      .get<ApiResponse<WorkspaceArtifactFile[]>>('/chat_window/workspace_files', {
         params: { member_id: memberId, session_id: sessionId },
       })
-      .then((res) => res.data.files);
+      .then((res) => ensureArray<WorkspaceArtifactFile>(res.data?.data));
   },
 };
 
 export const sessionsApi = {
-  list: (memberId: number) =>
+  list: (memberId: number, sessionType: SessionType) =>
     api
-      .get<ChatSession[]>('/sessions', {
-        params: { member_id: memberId, session_type: 'group_chat' },
+      .get<ApiResponse<ChatSession[]>>('/sessions', {
+        params: { member_id: memberId, session_type: sessionType },
       })
-      .then((res) => res.data),
+      .then((res) => ensureArray<ChatSession>(res.data?.data)),
   getMessages: (sessionId: string, memberId: number) =>
     api
-      .get<SessionMessage[]>(`/sessions/${sessionId}/messages`, {
+      .get<ApiResponse<SessionMessage[]>>(`/sessions/${sessionId}/messages`, {
         params: { member_id: memberId },
       })
-      .then((res) => res.data),
+      .then((res) => ensureArray<SessionMessage>(res.data?.data)),
+};
+
+export const authApi = {
+  login: (payload: { username: string; password: string }) =>
+    axios.post<LoginResponse>(`${USER_SERVICE_BASE_URL}/auth/login`, payload).then((res) => res.data),
 };
 
 export default api;

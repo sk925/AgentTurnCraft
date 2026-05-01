@@ -20,6 +20,7 @@ class Skill(Base):
     __tablename__ = 'skill'
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
     name = Column(String(255), nullable=False,unique=True)
     description = Column(Text)
     file_path = Column(String(500))
@@ -32,6 +33,7 @@ class Agent(Base):
     __tablename__ = 'agent'
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
     prompt = Column(Text)
