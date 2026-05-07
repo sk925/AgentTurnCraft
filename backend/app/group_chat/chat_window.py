@@ -1,12 +1,18 @@
 import json
+from typing import Annotated
+
+from app.auth import get_current_user_id
 from app.group_chat.chat_common import SessionType, SpearkerRecord, WindowState
 from app.group_chat.chat_graph import get_window_graph
-from app.models import Agent
+from sqlalchemy import or_
+
+from app.constants import RESOURCE_TYPE_BUILTIN
+from app.models import Agent, Group
 from app.session.service import get_or_create_session
 from app.utils import snowflake
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 from app.database import get_db
@@ -18,16 +24,20 @@ router = APIRouter(prefix="/chat_window")
 class WindowChatRequest(BaseModel):
     user_message: str
     org_id: int
-    member_id: int
     session_id: str | None
     round_id: str | None
     session_type: SessionType = SessionType.CHAT
+    group_id: int | None = Field(
+        default=None,
+        description="群聊时可选：仅允许该群组内的智能体进入候选池",
+    )
 
     
 @router.post("/chat")
 async def window_chat(
     window_chat_request: WindowChatRequest,
     request: Request,
+    member_id: Annotated[int, Depends(get_current_user_id)],
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
 
@@ -37,7 +47,7 @@ async def window_chat(
     get_or_create_session(
         db=db,
         session_id=session_id,
-        member_id=window_chat_request.member_id,
+        member_id=member_id,
         user_message=window_chat_request.user_message,
         session_type=window_chat_request.session_type.value,
     )
@@ -47,24 +57,42 @@ async def window_chat(
 
     
 
-    #查询所有可用智能体
-    all_agents = db.query(Agent).filter(Agent.user_id == window_chat_request.member_id).all()
+    # 查询可用智能体：群聊且指定 group_id 时，候选池限定为该群组成员
+    if window_chat_request.session_type == SessionType.GROUP_CHAT and window_chat_request.group_id is not None:
+        group = db.query(Group).filter(Group.id == window_chat_request.group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="群组不存在")
+        if group.resource_type != RESOURCE_TYPE_BUILTIN and group.user_id != member_id:
+            raise HTTPException(status_code=404, detail="群组不存在")
+        all_agents = list(group.agents or [])
+        if not all_agents:
+            raise HTTPException(status_code=400, detail="该群组下暂无智能体，请先在群组管理中添加成员")
+    else:
+        all_agents = (
+            db.query(Agent)
+            .filter(
+                or_(Agent.user_id == member_id, Agent.resource_type == RESOURCE_TYPE_BUILTIN),
+            )
+            .all()
+        )
+
     all_agents_data = [
         {
             "id": agent.id,
             "name": agent.name,
             "description": agent.description,
-            "prompt": agent.prompt
-        } for agent in all_agents
+            "prompt": agent.prompt,
+        }
+        for agent in all_agents
     ]
 
     config = {"configurable": {"thread_id": session_id}}
     window_state: WindowState = {"session_id": session_id, 
                   "round_id": round_id, 
                   "user_message": window_chat_request.user_message, 
-                  "member_id": window_chat_request.member_id,
+                  "member_id": member_id,
                   "all_agents": all_agents_data,
-                  "user_profile":{"member_id": window_chat_request.member_id, "org_id": window_chat_request.org_id, "member_role": "STUDENT"}
+                  "user_profile":{"member_id": member_id, "org_id": window_chat_request.org_id, "member_role": "STUDENT"}
                   }
     window_graph: CompiledStateGraph = get_window_graph(request.app.state.checkpointer)
     

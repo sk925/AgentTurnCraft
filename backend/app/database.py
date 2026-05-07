@@ -43,8 +43,23 @@ def transactional_session() -> Session:
         safe_session.remove()
 
         
+def _ensure_resource_type_columns() -> None:
+    """已有库在 create_all 前补列，避免仅 metadata 变更时缺列。"""
+    from sqlalchemy import text
+
+    stmts = [
+        "ALTER TABLE skill ADD COLUMN IF NOT EXISTS type INTEGER NOT NULL DEFAULT 2",
+        "ALTER TABLE agent ADD COLUMN IF NOT EXISTS type INTEGER NOT NULL DEFAULT 2",
+        'ALTER TABLE "group" ADD COLUMN IF NOT EXISTS type INTEGER NOT NULL DEFAULT 2',
+    ]
+    with engine.begin() as conn:
+        for sql in stmts:
+            conn.execute(text(sql))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_resource_type_columns()
 
 
 

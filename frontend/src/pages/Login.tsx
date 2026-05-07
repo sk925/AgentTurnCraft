@@ -7,7 +7,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname ?? '/';
+  const fromLoc = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | undefined)
+    ?.from;
+  const returnTo =
+    fromLoc?.pathname != null && fromLoc.pathname !== ''
+      ? `${fromLoc.pathname}${fromLoc.search ?? ''}${fromLoc.hash ?? ''}`
+      : '/chat';
 
   const handleFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
@@ -15,7 +20,7 @@ export default function LoginPage() {
       const data = await authApi.login(values);
       setUserServiceToken(data.access_token);
       message.success('登录成功');
-      void navigate(from, { replace: true });
+      void navigate(returnTo, { replace: true });
     } catch (error) {
       console.error('登录失败', error);
       message.error('登录失败，请检查用户名或密码');

@@ -1,0 +1,349 @@
+/* 面向公众门户：左侧导航 + 浅色主区 + 卡片栅格 */
+
+:root {
+  --portal-header-border: rgba(15, 23, 42, 0.08);
+  --portal-text: #0f172a;
+  --portal-muted: #64748b;
+  --portal-surface: #ffffff;
+  --portal-canvas: #f4f7fb;
+  --portal-accent: #2563eb;
+  --portal-accent-soft: #eff6ff;
+  --portal-radius: 14px;
+  --portal-chip-border: rgba(15, 23, 42, 0.1);
+  --portal-sider-bg: #fafbfc;
+  --portal-sider-border: rgba(15, 23, 42, 0.08);
+}
+
+.portal-shell.ant-layout {
+  min-height: 100vh;
+  background: var(--portal-canvas);
+}
+
+/* 左侧栏 */
+.portal-shell .portal-sider.ant-layout-sider {
+  background: var(--portal-sider-bg) !important;
+  border-right: 1px solid var(--portal-sider-border);
+  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.04);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.portal-shell .portal-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+}
+
+.portal-sider-brand {
+  padding: 22px 18px 18px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--portal-sider-border);
+  flex-shrink: 0;
+}
+
+.portal-sider-brand__name {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--portal-text);
+  line-height: 1.2;
+}
+
+.portal-sider-brand__sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--portal-muted);
+  line-height: 1.3;
+}
+
+.portal-sider-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.portal-sider-menu.ant-menu-light.ant-menu-root.ant-menu-inline {
+  border-inline-end: none !important;
+  padding: 12px 10px 8px;
+  background: transparent !important;
+}
+
+.portal-sider-menu.ant-menu-light .ant-menu-item {
+  margin: 4px 0 !important;
+  width: 100% !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  border-radius: 10px !important;
+  color: var(--portal-muted) !important;
+  font-weight: 500;
+}
+
+.portal-sider-menu.ant-menu-light .ant-menu-item:hover {
+  color: var(--portal-text) !important;
+  background: rgba(37, 99, 235, 0.06) !important;
+}
+
+.portal-sider-menu.ant-menu-light .ant-menu-item-selected {
+  color: var(--portal-accent) !important;
+  background: var(--portal-accent-soft) !important;
+}
+
+.portal-sider-menu.ant-menu-light .ant-menu-item-selected::after {
+  display: none;
+}
+
+.portal-sider-footer {
+  padding: 12px 14px 20px;
+  border-top: 1px solid var(--portal-sider-border);
+  flex-shrink: 0;
+  background: var(--portal-sider-bg);
+}
+
+/* 右侧主列 */
+.portal-main.ant-layout {
+  min-height: 100vh;
+  min-width: 0;
+  background: var(--portal-canvas);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 对话 / 群聊：最近会话横条 */
+.portal-session-strip {
+  border-bottom: 1px solid var(--portal-header-border);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(8px);
+  padding: 10px 16px 12px;
+}
+
+.portal-session-strip__inner {
+  width: 100%;
+  margin: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.portal-session-strip__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--portal-muted);
+  flex-shrink: 0;
+}
+
+.portal-session-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.portal-session-chip {
+  flex-shrink: 0;
+  border: 1px solid var(--portal-chip-border);
+  background: #fff;
+  color: var(--portal-text);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.portal-session-chip:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: var(--portal-accent-soft);
+}
+
+.portal-session-chip--active {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: var(--portal-accent-soft);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+  color: var(--portal-accent);
+  font-weight: 600;
+}
+
+.portal-session-new-btn {
+  flex-shrink: 0;
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--portal-accent);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.portal-session-new-btn:hover {
+  background: #fff;
+  border-style: solid;
+}
+
+.portal-session-empty {
+  font-size: 13px;
+  color: var(--portal-muted);
+}
+
+/* 主内容区 */
+.portal-content {
+  flex: 1;
+  width: 100%;
+}
+
+/* 列表 / 对话主区：贴侧栏对齐，避免 max-width + 居中造成左侧大空白 */
+.portal-content--catalog {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 20px 20px 48px 16px;
+  box-sizing: border-box;
+}
+
+.portal-content--chat {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 12px 16px 32px 12px;
+  box-sizing: border-box;
+}
+
+/* 列表页通用 */
+.portal-page-hero {
+  margin-bottom: 20px;
+}
+
+.portal-page-hero .ant-typography h2.ant-typography {
+  margin-bottom: 6px;
+  letter-spacing: -0.02em;
+}
+
+/* 工具栏：同一行左筛选、右操作，中间不再被 space-between 扯开 */
+.portal-toolbar {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px 16px;
+  padding: 12px 14px;
+  background: var(--portal-surface);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 12px;
+}
+
+.portal-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.portal-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.portal-card.ant-card {
+  border-radius: var(--portal-radius);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  height: 100%;
+  background: var(--portal-surface);
+}
+
+.portal-card.ant-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 20px;
+}
+
+.portal-card__head {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.portal-card__avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--portal-accent);
+  flex-shrink: 0;
+}
+
+.portal-card__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--portal-text);
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.portal-card__meta {
+  font-size: 12px;
+  color: var(--portal-muted);
+}
+
+.portal-card__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.portal-card__footer {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.portal-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.portal-skill-card .portal-card__avatar {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  color: #059669;
+}
+
+.portal-group-card .portal-card__avatar {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #b45309;
+}

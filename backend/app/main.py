@@ -1,16 +1,19 @@
 from contextlib import asynccontextmanager
+from typing import Any
 
 from app.group_chat import chat_window
 from app.config import settings
-from app.schemas import ApiResponse, success_response
+from app.schemas import ApiResponse, api_error_dict, success_response
 from app.session import router as session_router
 from app.workspace import workspace_files
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.database import init_db
-from app.routers import agents, skills
+from app.routers import agents, groups, skills
 
 
 @asynccontextmanager
@@ -29,6 +32,41 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="智能体管理后台", version="0.1.0", lifespan=lifespan)
 
+
+def _http_detail_to_message(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts: list[str] = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = item.get("loc", ())
+                msg = item.get("msg", "")
+                parts.append(f"{'/'.join(str(x) for x in loc)}: {msg}")
+            else:
+                parts.append(str(item))
+        return "; ".join(parts) if parts else "请求参数无效"
+    if isinstance(detail, dict):
+        return str(detail.get("msg") or detail)
+    return "请求失败"
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+    msg = _http_detail_to_message(exc.detail)
+    code = exc.status_code if exc.status_code >= 400 else 500
+    return JSONResponse(status_code=exc.status_code, content=api_error_dict(code=code, message=msg))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    msg = _http_detail_to_message(exc.errors())
+    return JSONResponse(
+        status_code=422,
+        content=api_error_dict(code=422, message=msg or "请求参数无效"),
+    )
+
+
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
@@ -41,6 +79,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
+app.include_router(groups.router, prefix="/api", tags=["groups"])
 app.include_router(chat_window.router, prefix="/api", tags=["chat_window"])
 app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files"])
 app.include_router(session_router, prefix="/api", tags=["sessions"])

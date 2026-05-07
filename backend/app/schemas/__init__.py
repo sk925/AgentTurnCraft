@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Generic, Optional, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
@@ -16,6 +16,11 @@ def success_response(data: T | None = None, message: str = "ok") -> ApiResponse[
     return ApiResponse[T](code=0, message=message, data=data)
 
 
+def api_error_dict(*, code: int, message: str) -> dict:
+    """与 ApiResponse 字段一致，供异常处理器 JSON 返回（非 0 的 code 表示失败）。"""
+    return {"code": code, "message": message, "data": None}
+
+
 class SkillBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -27,11 +32,11 @@ class SkillCreate(SkillBase):
 
 class SkillResponse(SkillBase):
     id: int
+    type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
     file_path: Optional[str] = None
     create_time: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentBase(BaseModel):
@@ -52,11 +57,35 @@ class AgentUpdate(BaseModel):
 
 class AgentResponse(AgentBase):
     id: int
+    type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
     create_time: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentWithSkills(AgentResponse):
     skills: list[SkillResponse] = []
+
+
+class GroupBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class GroupCreate(GroupBase):
+    agent_ids: list[int] = []
+
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    agent_ids: Optional[list[int]] = None
+
+
+class GroupResponse(GroupBase):
+    id: int
+    type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
+    create_time: datetime
+    agents: list[AgentResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)

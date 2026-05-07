@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.auth import get_current_user_id
 from app.config import _BACKEND_ROOT
 from app.schemas import ApiResponse, success_response
 
@@ -11,7 +13,7 @@ router = APIRouter(prefix="/chat_window")
 
 @router.get("/workspace_files", response_model=ApiResponse[list[dict]])
 def list_workspace_files(
-    member_id: int = Query(..., description="成员ID"),
+    member_id: Annotated[int, Depends(get_current_user_id)],
     session_id: str = Query(..., description="会话ID"),
 ):
     """列出某会话工作空间下的产物文件"""

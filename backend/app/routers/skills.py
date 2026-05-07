@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from typing import Annotated, List
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
-from typing import List
+
+from app.auth import CurrentUser, get_current_user, get_current_user_id, get_current_user_optional
+from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
+from app.query_access import list_skills
 import os
 import zipfile
 import shutil
@@ -13,19 +18,29 @@ router = APIRouter()
 
 
 @router.get("/skills", response_model=ApiResponse[List[SkillResponse]])
-def get_skills(user_id: int, db: Session = Depends(get_db)):
-    """获取技能列表"""
-    skills = db.query(Skill).filter(Skill.user_id == user_id).all()
+def get_skills(
+    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    db: Session = Depends(get_db),
+):
+    """获取技能列表（可不登录：仅内置 + 已登录用户自己的自定义）"""
+    skills = list_skills(db, current_user)
     return success_response(skills)
 
 
 @router.post("/skills", response_model=ApiResponse[SkillResponse])
 async def upload_skill(
-    user_id: int,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    description: str = Form(..., description="技能描述，必填"),
+    db: Session = Depends(get_db),
 ):
-    """上传技能压缩包"""
+    """上传技能压缩包（须同时提交技能描述）"""
+    desc = (description or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="请填写技能描述")
+    if len(desc) > 2000:
+        raise HTTPException(status_code=400, detail="技能描述过长，请控制在 2000 字以内")
+
     upload_dir = ".uploads/skills"
     os.makedirs(upload_dir, exist_ok=True)
 
@@ -44,7 +59,6 @@ async def upload_skill(
 
     skill_md_path = os.path.join(extract_dir, "skill.md")
     name = skill_name
-    description = ""
 
     if os.path.exists(skill_md_path):
         with open(skill_md_path, 'r', encoding='utf-8') as f:
@@ -54,15 +68,15 @@ async def upload_skill(
                 line = line.strip()
                 if line.startswith('# '):
                     name = line[2:].strip()
-                elif line and not line.startswith('#'):
-                    description = line
                     break
 
+    resource_type = RESOURCE_TYPE_BUILTIN if current_user.is_admin else RESOURCE_TYPE_CUSTOM
     skill = Skill(
-        user_id=user_id,
+        user_id=current_user.id,
         name=name,
-        description=description,
-        file_path=extract_dir
+        description=desc,
+        file_path=extract_dir,
+        resource_type=resource_type,
     )
     db.add(skill)
     db.commit()
@@ -72,11 +86,13 @@ async def upload_skill(
 
 
 @router.delete("/skills/{skill_id}")
-def delete_skill(skill_id: int, user_id: int, db: Session = Depends(get_db)):
-    """删除技能"""
-    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.user_id == user_id).first()
+def delete_skill(skill_id: int, user_id: Annotated[int, Depends(get_current_user_id)], db: Session = Depends(get_db)):
+    """删除技能（仅创建人可删）"""
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="技能不存在")
+    if skill.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权删除：仅创建人可删除该技能")
 
     if skill.agents:
         raise HTTPException(status_code=400, detail="该技能有关联的智能体，请先解关联")

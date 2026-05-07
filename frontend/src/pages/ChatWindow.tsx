@@ -8,15 +8,24 @@ import {
   Empty,
   Input,
   Row,
+  Select,
   Space,
   Tag,
   Typography,
   message,
 } from 'antd';
 import { TeamOutlined, UserOutlined } from '@ant-design/icons';
-import { chatWindowApi, sessionsApi } from '../api';
-import type { ChatWindowEvent, SessionMessage, SessionType, WorkspaceArtifactFile } from '../api';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  chatWindowApi,
+  getBackendErrorMessage,
+  getCurrentUserIdFromToken,
+  goLoginPage,
+  groupsApi,
+  isUserLoggedIn,
+  sessionsApi,
+} from '../api';
+import type { ChatWindowEvent, Group, SessionMessage, SessionType, WorkspaceArtifactFile } from '../api';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import './ChatWindow.css';
 
 type ChatMessage = {
@@ -34,15 +43,19 @@ type ChatWindowPageProps = {
 };
 
 export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageProps) {
+  const memberId = getCurrentUserIdFromToken();
   const isGroupChat = sessionType === 'group';
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [orgId] = useState<number>(1);
-  const [memberId] = useState<number>(1);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [groupMembers, setGroupMembers] = useState<Array<{ id: number; name: string }>>([]);
+  /** 当前轮次后端「建群」结果（SSE create_group） */
+  const [roundGroupMembers, setRoundGroupMembers] = useState<Array<{ id: number; name: string }>>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceArtifactFile[]>([]);
   const [currentSpeaker, setCurrentSpeaker] = useState<{ id: number; name: string } | null>(null);
@@ -53,6 +66,37 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   const chatMessages = useMemo(() => messages.filter((item) => item.role !== 'system'), [messages]);
 
+  const visibleGroupMembers = useMemo(() => {
+    if (!isGroupChat) {
+      return [];
+    }
+    const selected = selectedGroupId != null ? groups.find((g) => g.id === selectedGroupId) : null;
+    if (selected) {
+      const ids = new Set((selected.agents ?? []).map((a) => a.id));
+      if (roundGroupMembers.length > 0) {
+        return roundGroupMembers.filter((m) => ids.has(m.id));
+      }
+      return (selected.agents ?? []).map((a) => ({ id: a.id, name: a.name }));
+    }
+    return roundGroupMembers;
+  }, [isGroupChat, groups, selectedGroupId, roundGroupMembers]);
+
+  const membersEmptyDescription = useMemo(() => {
+    if (!isGroupChat) {
+      return '尚未创建群聊成员';
+    }
+    if (selectedGroupId != null && roundGroupMembers.length > 0 && visibleGroupMembers.length === 0) {
+      return '当前轮次发言成员不在所选群组中';
+    }
+    if (selectedGroupId != null) {
+      const g = groups.find((x) => x.id === selectedGroupId);
+      if (g && (!g.agents || g.agents.length === 0)) {
+        return '该群组暂无智能体，请先在群组管理中添加';
+      }
+    }
+    return '尚未创建群聊成员';
+  }, [isGroupChat, selectedGroupId, groups, roundGroupMembers.length, visibleGroupMembers.length]);
+
   const emptyChatDescription = useMemo(() => {
     if (sessionId) return '历史对话';
     return isGroupChat ? '新建群聊' : '新建对话';
@@ -62,10 +106,23 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   // 否则可能保留旧 sessionId/messages，导致默认文案“看起来没生效”
   useEffect(() => {
     setSessionId(null);
-    setGroupMembers([]);
+    setRoundGroupMembers([]);
+    setSelectedGroupId(undefined);
     setCurrentSpeaker(null);
     setMessages([]);
     setWorkspaceFiles([]);
+  }, [isGroupChat]);
+
+  useEffect(() => {
+    if (!isGroupChat) {
+      return;
+    }
+    void groupsApi
+      .getAll()
+      .then(setGroups)
+      .catch((error: unknown) => {
+        message.error(getBackendErrorMessage(error, '加载群组列表失败'));
+      });
   }, [isGroupChat]);
 
   const toChatMessage = (record: SessionMessage, index: number): ChatMessage => {
@@ -91,12 +148,16 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   };
 
   const refreshWorkspaceFiles = async (targetSessionId?: string | null) => {
+    if (!isUserLoggedIn()) {
+      setWorkspaceFiles([]);
+      return;
+    }
     const sid = targetSessionId ?? sessionId;
     if (!sid) {
       return;
     }
     try {
-      const files = await chatWindowApi.getWorkspaceFiles(memberId, sid);
+      const files = await chatWindowApi.getWorkspaceFiles(sid);
       setWorkspaceFiles(files);
     } catch (error) {
       console.error(error);
@@ -110,7 +171,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         void refreshWorkspaceFiles(event.session_id);
         break;
       case 'create_group':
-        setGroupMembers(event.group_members ?? []);
+        setRoundGroupMembers(event.group_members ?? []);
         break;
       case 'select_speaker':
         // 新一轮选人：结束上一轮可能未收到收尾 speaker 的流式气泡
@@ -216,6 +277,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     if (!text || submitting) {
       return;
     }
+    if (!isUserLoggedIn() || memberId == null) {
+      message.warning('请先登录后再发送消息');
+      goLoginPage(navigate, { pathname: location.pathname, search: location.search });
+      return;
+    }
 
     appendMessage({
       id: `user-${Date.now()}`,
@@ -231,16 +297,16 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         {
           user_message: text,
           org_id: orgId,
-          member_id: memberId,
           session_id: sessionId,
           round_id: null,
           session_type: sessionType,
+          group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
         },
         handleEvent,
       );
     } catch (error) {
       console.error(error);
-      message.error('对话请求失败，请检查后端服务');
+      message.error(error instanceof Error ? error.message : '对话请求失败，请检查后端服务');
     } finally {
       setSubmitting(false);
     }
@@ -255,7 +321,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       setMessages([]);
       setWorkspaceFiles([]);
       if (isGroupChat) {
-        setGroupMembers([]);
+        setRoundGroupMembers([]);
       }
       return;
     }
@@ -263,8 +329,15 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       return;
     }
     void (async () => {
+      if (!isUserLoggedIn() || memberId == null) {
+        if (selectedSessionId) {
+          message.warning('查看历史对话请先登录');
+          navigate(isGroupChat ? '/group-chat' : '/chat', { replace: true });
+        }
+        return;
+      }
       try {
-        const allSessions = await sessionsApi.list(memberId, sessionType);
+        const allSessions = await sessionsApi.list(sessionType);
         const exists = allSessions.some((item) => item.id === selectedSessionId);
         if (!exists) {
           // 当前账号下无此会话：不再请求 messages，并清理 URL
@@ -273,7 +346,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           setMessages([]);
           setWorkspaceFiles([]);
           if (isGroupChat) {
-            setGroupMembers([]);
+            setRoundGroupMembers([]);
           }
           setCurrentSpeaker(null);
           return;
@@ -281,29 +354,49 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
         setSessionId(selectedSessionId);
         if (isGroupChat) {
-          setGroupMembers([]);
+          setRoundGroupMembers([]);
         }
         setCurrentSpeaker(null);
         await refreshWorkspaceFiles(selectedSessionId);
-        const records = await sessionsApi.getMessages(selectedSessionId, memberId);
+        const records = await sessionsApi.getMessages(selectedSessionId);
         setMessages((Array.isArray(records) ? records : []).map(toChatMessage));
       } catch (error) {
         console.error('加载会话消息失败', error);
-        message.error('加载会话消息失败');
+        message.error(getBackendErrorMessage(error, '加载会话消息失败'));
       }
     })();
   }, [searchParams, memberId, sessionId, sessionType, isGroupChat, navigate]);
 
   return (
-    <Row gutter={16} style={{ minHeight: 'calc(100vh - 120px)' }}>
+    <Row gutter={[16, 16]} style={{ minHeight: 'calc(100vh - 140px)' }}>
       {isGroupChat && (
-        <Col span={5}>
-          <Card title={<><TeamOutlined /> 群聊成员</>} style={{ height: '100%' }}>
-            {groupMembers.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未创建群聊成员" />
+        <Col xs={24} lg={5}>
+          <Card
+            className="portal-card"
+            variant="borderless"
+            title={
+              <Space>
+                <TeamOutlined />
+                群聊成员
+              </Space>
+            }
+            extra={
+              <Select
+                allowClear
+                placeholder="选择群组"
+                style={{ minWidth: 140, maxWidth: 200 }}
+                value={selectedGroupId}
+                onChange={(v) => setSelectedGroupId(v ?? undefined)}
+                options={groups.map((g) => ({ label: g.name, value: g.id }))}
+              />
+            }
+            style={{ height: '100%' }}
+          >
+            {visibleGroupMembers.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={membersEmptyDescription} />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {groupMembers.map((item) => (
+                {visibleGroupMembers.map((item) => (
                   <div key={item.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
                     <Space align="start">
                       <Badge dot={currentSpeakerId === item.id} color="green">
@@ -329,8 +422,13 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         </Col>
       )}
 
-      <Col span={isGroupChat ? 13 : 18}>
-        <Card title="群聊对话" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Col xs={24} lg={isGroupChat ? 13 : 18}>
+        <Card
+          className="portal-card"
+          variant="borderless"
+          title={isGroupChat ? '群聊对话' : '对话'}
+          style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+        >
           <div className="chat-scroll-panel">
             {chatMessages.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
@@ -355,20 +453,20 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           <Space.Compact style={{ width: '100%' }}>
             <Input
               value={input}
-              placeholder="输入你的问题..."
+              placeholder={isUserLoggedIn() ? '输入你的问题...' : '请先登录后再发送消息'}
               onChange={(e) => setInput(e.target.value)}
-              onPressEnter={sendMessage}
+              onPressEnter={() => void sendMessage()}
               disabled={submitting}
             />
-            <Button type="primary" loading={submitting} onClick={sendMessage}>
+            <Button type="primary" loading={submitting} onClick={() => void sendMessage()}>
               发送
             </Button>
           </Space.Compact>
         </Card>
       </Col>
 
-      <Col span={6}>
-        <Card title="工作空间" style={{ height: '100%' }}>
+      <Col xs={24} lg={6}>
+        <Card className="portal-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
           {workspaceFiles.length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
           ) : (

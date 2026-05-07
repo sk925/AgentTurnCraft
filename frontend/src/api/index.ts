@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios, { type AxiosError } from 'axios';
+import type { NavigateFunction } from 'react-router-dom';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000/api',
@@ -6,6 +7,73 @@ const api = axios.create({
 
 const USER_SERVICE_BASE_URL = 'http://localhost:8001/api';
 const USER_SERVICE_TOKEN_KEY = 'user_service_access_token';
+
+/** 解析后端 JSON：成功体为 { code, message, data }；错误体同样字段，优先读 message，兼容旧版 detail */
+export function extractBackendMessage(data: unknown): string | undefined {
+  if (data == null || typeof data !== 'object') {
+    return undefined;
+  }
+  const d = data as { message?: string; detail?: unknown };
+  if (typeof d.message === 'string' && d.message.length > 0) {
+    return d.message;
+  }
+  if (typeof d.detail === 'string' && d.detail.length > 0) {
+    return d.detail;
+  }
+  return undefined;
+}
+
+export function getBackendErrorMessage(error: unknown, fallback: string): string {
+  const e = error as AxiosError & { backendMessage?: string };
+  if (e.backendMessage) {
+    return e.backendMessage;
+  }
+  return extractBackendMessage(e.response?.data) ?? fallback;
+}
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(USER_SERVICE_TOKEN_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (error: AxiosError) => {
+    const msg = extractBackendMessage(error.response?.data);
+    if (msg) {
+      (error as AxiosError & { backendMessage?: string }).backendMessage = msg;
+    }
+    return Promise.reject(error);
+  },
+);
+
+/** 从 access_token 解析 `sub`（用户 ID），与后端 JWT 一致；仅用于前端展示/传参，权限以后端校验为准。 */
+export function getCurrentUserIdFromToken(): number | null {
+  const token = localStorage.getItem(USER_SERVICE_TOKEN_KEY);
+  if (!token) {
+    return null;
+  }
+  try {
+    const part = token.split('.')[1];
+    if (!part) {
+      return null;
+    }
+    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const json = JSON.parse(atob(padded)) as { sub?: string };
+    const sub = json?.sub;
+    if (sub == null || sub === '') {
+      return null;
+    }
+    const n = Number(sub);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
 
 interface ApiResponse<T> {
   code: number;
@@ -20,6 +88,18 @@ export interface LoginResponse {
 
 export function getUserServiceToken(): string | null {
   return localStorage.getItem(USER_SERVICE_TOKEN_KEY);
+}
+
+/** 是否已保存 user-service 的 access_token（仅表示本地有令牌，有效性由后端校验） */
+export function isUserLoggedIn(): boolean {
+  return Boolean(getUserServiceToken());
+}
+
+export type LoginFromLocation = { pathname: string; search?: string; hash?: string };
+
+/** 跳转登录页，登录成功后可用 `from` 回到原页面 */
+export function goLoginPage(navigate: NavigateFunction, from: LoginFromLocation) {
+  navigate('/login', { state: { from } });
 }
 
 export function setUserServiceToken(token: string): void {
@@ -39,6 +119,8 @@ export interface Skill {
   name: string;
   description: string | null;
   file_path: string | null;
+  /** 1 内置（admin 创建） 2 自定义 */
+  type?: number;
   create_time: string;
 }
 
@@ -47,17 +129,30 @@ export interface Agent {
   name: string;
   description: string | null;
   prompt: string | null;
+  /** 1 内置 2 自定义 */
+  type?: number;
   create_time: string;
   skills?: Skill[];
+}
+
+export interface Group {
+  id: number;
+  name: string;
+  description: string | null;
+  /** 1 内置 2 自定义 */
+  type?: number;
+  create_time: string;
+  agents: Agent[];
 }
 
 export interface ChatWindowRequest {
   user_message: string;
   org_id: number;
-  member_id: number;
   session_id?: string | null;
   round_id?: string | null;
   session_type?: SessionType;
+  /** 群聊：指定后候选与入群智能体仅来自该群组 */
+  group_id?: number | null;
 }
 
 export type SessionType = 'group' | 'ppt' | 'chat';
@@ -185,35 +280,42 @@ function parseSSEChunk(chunk: string): ChatWindowEvent[] {
 }
 
 export const skillsApi = {
-  getAll: (userId: number) =>
-    api
-      .get<ApiResponse<Skill[]>>('/skills', { params: { user_id: userId } })
-      .then((res) => ensureArray<Skill>(res.data?.data)),
-  upload: (userId: number, file: File) => {
+  getAll: () =>
+    api.get<ApiResponse<Skill[]>>('/skills').then((res) => ensureArray<Skill>(res.data?.data)),
+  upload: (file: File, description: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post<ApiResponse<Skill>>('/skills', formData, {
-      params: { user_id: userId },
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).then((res) => res.data.data);
+    formData.append('description', description);
+    return api
+      .post<ApiResponse<Skill>>('/skills', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((res) => res.data.data);
   },
-  delete: (userId: number, id: number) => api.delete(`/skills/${id}`, { params: { user_id: userId } }),
+  delete: (id: number) => api.delete(`/skills/${id}`),
 };
 
 export const agentsApi = {
-  getAll: (userId: number) =>
-    api.get<ApiResponse<Agent[]>>('/agents', { params: { user_id: userId } }).then((res) => ensureArray<Agent>(res.data?.data)),
-  create: (userId: number, data: { name: string; description?: string; prompt?: string }) =>
-    api.post<ApiResponse<Agent>>('/agents', data, { params: { user_id: userId } }).then((res) => res.data.data),
-  update: (userId: number, id: number, data: { name?: string; description?: string; prompt?: string }) =>
-    api.put<ApiResponse<Agent>>(`/agents/${id}`, data, { params: { user_id: userId } }).then((res) => res.data.data),
-  delete: (userId: number, id: number) => api.delete(`/agents/${id}`, { params: { user_id: userId } }),
-  addSkill: (userId: number, agentId: number, skillId: number) =>
-    api.post(`/agents/${agentId}/skills/${skillId}`, null, { params: { user_id: userId } }),
-  removeSkill: (userId: number, agentId: number, skillId: number) =>
-    api.delete(`/agents/${agentId}/skills/${skillId}`, { params: { user_id: userId } }),
-  getWithSkills: (userId: number, id: number) =>
-    api.get<ApiResponse<Agent>>(`/agents/${id}`, { params: { user_id: userId } }).then((res) => res.data.data),
+  getAll: () => api.get<ApiResponse<Agent[]>>('/agents').then((res) => ensureArray<Agent>(res.data?.data)),
+  create: (data: { name: string; description?: string; prompt?: string }) =>
+    api.post<ApiResponse<Agent>>('/agents', data).then((res) => res.data.data),
+  update: (id: number, data: { name?: string; description?: string; prompt?: string }) =>
+    api.put<ApiResponse<Agent>>(`/agents/${id}`, data).then((res) => res.data.data),
+  delete: (id: number) => api.delete(`/agents/${id}`),
+  addSkill: (agentId: number, skillId: number) =>
+    api.post(`/agents/${agentId}/skills/${skillId}`, null),
+  removeSkill: (agentId: number, skillId: number) => api.delete(`/agents/${agentId}/skills/${skillId}`),
+  getWithSkills: (id: number) => api.get<ApiResponse<Agent>>(`/agents/${id}`).then((res) => res.data.data),
+};
+
+export const groupsApi = {
+  getAll: () => api.get<ApiResponse<Group[]>>('/groups').then((res) => ensureArray<Group>(res.data?.data)),
+  create: (data: { name: string; description?: string; agent_ids?: number[] }) =>
+    api.post<ApiResponse<Group>>('/groups', data).then((res) => res.data.data),
+  update: (id: number, data: { name?: string; description?: string; agent_ids?: number[] }) =>
+    api.put<ApiResponse<Group>>(`/groups/${id}`, data).then((res) => res.data.data),
+  delete: (id: number) => api.delete(`/groups/${id}`),
+  get: (id: number) => api.get<ApiResponse<Group>>(`/groups/${id}`).then((res) => res.data.data),
 };
 
 export const chatWindowApi = {
@@ -221,14 +323,29 @@ export const chatWindowApi = {
     data: ChatWindowRequest,
     onEvent: (event: ChatWindowEvent) => void,
   ) => {
+    const token = getUserServiceToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const response = await fetch('http://localhost:8000/api/chat_window/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data),
     });
 
     if (!response.ok) {
-      throw new Error(`请求失败: ${response.status}`);
+      let detail = `请求失败: ${response.status}`;
+      try {
+        const body = (await response.json()) as { detail?: string; message?: string };
+        const fromApi = extractBackendMessage(body);
+        if (fromApi) {
+          detail = fromApi;
+        }
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
     }
 
     if (!response.body) {
@@ -257,27 +374,25 @@ export const chatWindowApi = {
       });
     }
   },
-  getWorkspaceFiles: async (memberId: number, sessionId: string) => {
+  getWorkspaceFiles: async (sessionId: string) => {
     return api
       .get<ApiResponse<WorkspaceArtifactFile[]>>('/chat_window/workspace_files', {
-        params: { member_id: memberId, session_id: sessionId },
+        params: { session_id: sessionId },
       })
       .then((res) => ensureArray<WorkspaceArtifactFile>(res.data?.data));
   },
 };
 
 export const sessionsApi = {
-  list: (memberId: number, sessionType: SessionType) =>
+  list: (sessionType: SessionType) =>
     api
       .get<ApiResponse<ChatSession[]>>('/sessions', {
-        params: { member_id: memberId, session_type: sessionType },
+        params: { session_type: sessionType },
       })
       .then((res) => ensureArray<ChatSession>(res.data?.data)),
-  getMessages: (sessionId: string, memberId: number) =>
+  getMessages: (sessionId: string) =>
     api
-      .get<ApiResponse<SessionMessage[]>>(`/sessions/${sessionId}/messages`, {
-        params: { member_id: memberId },
-      })
+      .get<ApiResponse<SessionMessage[]>>(`/sessions/${sessionId}/messages`)
       .then((res) => ensureArray<SessionMessage>(res.data?.data)),
 };
 

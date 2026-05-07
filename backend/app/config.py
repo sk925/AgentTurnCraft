@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     model_api_key: str
     model_base_url: str
     model_router_name: str
+    # 与 user-service 一致，用于校验登录接口下发的 access_token
+    jwt_secret_key: str = "free-chat"
+    jwt_algorithm: str = "HS256"
 
 
 settings = Settings()
