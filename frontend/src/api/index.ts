@@ -401,4 +401,208 @@ export const authApi = {
     axios.post<LoginResponse>(`${USER_SERVICE_BASE_URL}/auth/login`, payload).then((res) => res.data),
 };
 
+/** WebSocket 消息协议 */
+export type WSClientMessage =
+  | { type: 'chat'; user_message: string; org_id: number; session_id?: string | null; session_type?: SessionType; group_id?: number | null }
+  | { type: 'catchup'; session_id: string }
+  | { type: 'ping' };
+
+export type WSServerMessage =
+  | ChatWindowEvent
+  | { event: 'connected'; session_id: string }
+  | { event: 'catchup_round'; round_id: string | null; events: ChatWindowEvent[]; status: string }
+  | { event: 'pong' }
+  | { event: 'error'; message: string };
+
+type WSEventCallback = (event: WSServerMessage) => void;
+
+const WS_BASE_URL = 'ws://localhost:8000/api/chat_window/ws';
+const PING_INTERVAL = 30000; // 30s
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY = 1000; // 1s
+
+export class ChatWebSocket {
+  private ws: WebSocket | null = null;
+  private callbacks: Set<WSEventCallback> = new Set();
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionId: string | null = null;
+  private intentionalClose = false;
+  private pendingMessages: WSClientMessage[] = [];
+  private lastCloseCode: number | null = null;
+
+  /** 是否已连接 */
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** 建立 WebSocket 连接，可传入已有 session_id */
+  connect(sessionId?: string | null) {
+    this.sessionId = sessionId ?? null;
+    this.intentionalClose = false;
+    this.pendingMessages = [];
+    this.lastCloseCode = null;
+
+    // 关闭已有连接
+    if (this.ws) {
+      this.ws.onclose = null; // 阻止重连
+      this.ws.close();
+      this.ws = null;
+    }
+
+    const token = getUserServiceToken();
+    if (!token) {
+      console.error('[ChatWebSocket] 未登录，无法建立连接');
+      this._notifyError('未登录，请先登录');
+      return;
+    }
+
+    const url = `${WS_BASE_URL}?token=${encodeURIComponent(token)}`;
+    this.ws = new WebSocket(url);
+
+    this.ws.onopen = () => {
+      console.log('[ChatWebSocket] 已连接');
+      this.reconnectAttempts = 0;
+      this._startPing();
+
+      // 发送连接中缓存的消息（catchup 等）
+      const hasPendingCatchup = this.pendingMessages.some((m) => m.type === 'catchup');
+      while (this.pendingMessages.length > 0) {
+        const msg = this.pendingMessages.shift()!;
+        this.ws!.send(JSON.stringify(msg));
+      }
+
+      // 如果没有排队的 catchup，且设置了 session_id，自动补充
+      if (!hasPendingCatchup && this.sessionId) {
+        this._send({ type: 'catchup', session_id: this.sessionId });
+      }
+    };
+
+    this.ws.onmessage = (event: MessageEvent<string>) => {
+      try {
+        const data = JSON.parse(event.data) as WSServerMessage;
+        this.callbacks.forEach((cb) => cb(data));
+      } catch {
+        console.error('[ChatWebSocket] 解析服务端消息失败', event.data);
+      }
+    };
+
+    this.ws.onclose = (event) => {
+      console.log(`[ChatWebSocket] 连接关闭: code=${event.code} reason=${event.reason}`);
+      this._stopPing();
+      this.lastCloseCode = event.code;
+      if (!this.intentionalClose) {
+        this._tryReconnect(event.code);
+      }
+    };
+
+    this.ws.onerror = (_event) => {
+      console.error('[ChatWebSocket] 连接错误');
+    };
+  }
+
+  /** 断开连接 */
+  disconnect() {
+    this.intentionalClose = true;
+    this._stopPing();
+    this.pendingMessages = [];
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  /** 发送聊天消息，返回 true 表示已发送 */
+  sendChat(params: {
+    user_message: string;
+    org_id: number;
+    session_id?: string | null;
+    session_type?: SessionType;
+    group_id?: number | null;
+  }): boolean {
+    if (!this.isConnected()) {
+      this._notifyError('连接未就绪，消息发送失败');
+      return false;
+    }
+    this._send({ type: 'chat', ...params });
+    return true;
+  }
+
+  /** 请求断线重放 */
+  sendCatchup(sessionId: string) {
+    this.sessionId = sessionId;
+    this._send({ type: 'catchup', session_id: sessionId });
+  }
+
+  /** 注册事件回调 */
+  onEvent(callback: WSEventCallback): () => void {
+    this.callbacks.add(callback);
+    return () => {
+      this.callbacks.delete(callback);
+    };
+  }
+
+  /** 更新 session_id（页面切换时） */
+  setSessionId(sessionId: string | null) {
+    this.sessionId = sessionId;
+  }
+
+  private _send(message: WSClientMessage) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else if (this.ws?.readyState === WebSocket.CONNECTING) {
+      this.pendingMessages.push(message);
+    } else {
+      console.warn('[ChatWebSocket] 连接未就绪，无法发送消息');
+    }
+  }
+
+  private _notifyError(message: string) {
+    const errorEvent: WSServerMessage = { event: 'error', message };
+    this.callbacks.forEach((cb) => cb(errorEvent));
+  }
+
+  private _startPing() {
+    this._stopPing();
+    this.pingTimer = setInterval(() => {
+      this._send({ type: 'ping' });
+    }, PING_INTERVAL);
+  }
+
+  private _stopPing() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private _tryReconnect(closeCode?: number) {
+    // 认证失败（4001）：不重连，提示用户重新登录
+    if (closeCode === 4001) {
+      console.error('[ChatWebSocket] 令牌无效或已过期，不重连');
+      this._notifyError('登录已过期，请重新登录');
+      return;
+    }
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.error('[ChatWebSocket] 重连次数已达上限');
+      this._notifyError('连接失败，请刷新页面重试');
+      return;
+    }
+    const delay = RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts);
+    this.reconnectAttempts += 1;
+    console.log(`[ChatWebSocket] ${delay}ms 后尝试第 ${this.reconnectAttempts} 次重连`);
+    this.reconnectTimer = setTimeout(() => {
+      this.connect(this.sessionId);
+    }, delay);
+  }
+}
+
+/** 全局单例 */
+export const chatWebSocket = new ChatWebSocket();
+
 export default api;

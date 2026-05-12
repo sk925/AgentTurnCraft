@@ -41,7 +41,6 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const selectedSessionId = new URLSearchParams(location.search).get('session_id');
 
   const currentSessionType: SessionType = location.pathname.startsWith('/group-chat') ? 'group' : 'chat';
   const isChatRoute =
@@ -113,6 +112,51 @@ function AppLayout() {
             onClick={({ key }) => void handleMenuClick(String(key))}
           />
         </div>
+
+        {/* 会话记录列表：对话/群聊页面时显示在菜单下方 */}
+        {isChatRoute && (
+          <div className="portal-sider-sessions">
+            <div className="portal-sider-sessions__head">
+              <span className="portal-sider-sessions__label">
+                {currentSessionType === 'group' ? '群聊记录' : '对话记录'}
+              </span>
+              <button
+                type="button"
+                className="portal-sider-sessions__new"
+                onClick={() => navigate(currentSessionType === 'group' ? '/group-chat' : '/chat')}
+              >
+                <PlusOutlined />
+              </button>
+            </div>
+            <div className="portal-sider-sessions__list">
+              {sessions.length === 0 ? (
+                <span className="portal-sider-sessions__empty">
+                  {isUserLoggedIn() ? '暂无记录' : '登录后查看'}
+                </span>
+              ) : (
+                sessions.map((s) => {
+                  const active = new URLSearchParams(location.search).get('session_id') === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`portal-sider-sessions__item${active ? ' portal-sider-sessions__item--active' : ''}`}
+                      title={s.title}
+                      onClick={() =>
+                        navigate(
+                          `${currentSessionType === 'group' ? '/group-chat' : '/chat'}?session_id=${s.id}`,
+                        )
+                      }
+                    >
+                      {s.title}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="portal-sider-footer">
           {isUserLoggedIn() ? (
             <Button
@@ -144,45 +188,6 @@ function AppLayout() {
       </Sider>
 
       <Layout className="portal-main">
-        {isChatRoute && (
-          <div className="portal-session-strip">
-            <div className="portal-session-strip__inner">
-              <span className="portal-session-strip__label">最近</span>
-              <div className="portal-session-scroll">
-                {sessions.length === 0 ? (
-                  <span className="portal-session-empty">
-                    {isUserLoggedIn() ? '暂无会话，点击下方开始' : '登录后可保存与查看历史会话'}
-                  </span>
-                ) : (
-                  sessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      className={`portal-session-chip${selectedSessionId === session.id ? ' portal-session-chip--active' : ''}`}
-                      title={session.title}
-                      onClick={() =>
-                        navigate(
-                          `${currentSessionType === 'group' ? '/group-chat' : '/chat'}?session_id=${session.id}`,
-                        )
-                      }
-                    >
-                      {session.title}
-                    </button>
-                  ))
-                )}
-              </div>
-              <button
-                type="button"
-                className="portal-session-new-btn"
-                onClick={() => navigate(currentSessionType === 'group' ? '/group-chat' : '/chat')}
-              >
-                <PlusOutlined />
-                {currentSessionType === 'group' ? '新建群聊' : '新建对话'}
-              </button>
-            </div>
-          </div>
-        )}
-
         <Content
           className={`portal-content${isChatRoute ? ' portal-content--chat' : ' portal-content--catalog'}`}
         >

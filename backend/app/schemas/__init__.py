@@ -89,3 +89,15 @@ class GroupResponse(GroupBase):
     agents: list[AgentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UploadFileResponse(BaseModel):
+    id: int
+    user_id: int
+    file_name: str
+    file_path: str
+    file_type: str
+    file_size: int
+    create_time: datetime
+
+    model_config = ConfigDict(from_attributes=True)

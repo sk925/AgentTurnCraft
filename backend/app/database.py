@@ -58,6 +58,10 @@ def _ensure_resource_type_columns() -> None:
 
 
 def init_db():
+    from app.graph_rag import db_models as _graph_rag_db  # noqa: F401
+    from app.models import agent_log as _agent_log  # noqa: F401
+    from app.models import upload_file as _upload_file  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     _ensure_resource_type_columns()
 

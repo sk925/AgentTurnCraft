@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Avatar,
   Badge,
@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { TeamOutlined, UserOutlined } from '@ant-design/icons';
 import {
+  chatWebSocket,
   chatWindowApi,
   getBackendErrorMessage,
   getCurrentUserIdFromToken,
@@ -24,7 +25,7 @@ import {
   isUserLoggedIn,
   sessionsApi,
 } from '../api';
-import type { ChatWindowEvent, Group, SessionMessage, SessionType, WorkspaceArtifactFile } from '../api';
+import type { ChatWindowEvent, Group, SessionMessage, SessionType, WSServerMessage, WorkspaceArtifactFile } from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import './ChatWindow.css';
 
@@ -102,8 +103,8 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     return isGroupChat ? '新建群聊' : '新建对话';
   }, [isGroupChat, sessionId]);
 
-  // 切换“对话/群聊”模式时，若 URL 中没有显式 session_id，需要清空旧状态
-  // 否则可能保留旧 sessionId/messages，导致默认文案“看起来没生效”
+  // 切换”对话/群聊”模式时，若 URL 中没有显式 session_id，需要清空旧状态
+  // 否则可能保留旧 sessionId/messages，导致默认文案”看起来没生效”
   useEffect(() => {
     setSessionId(null);
     setRoundGroupMembers([]);
@@ -112,6 +113,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     setMessages([]);
     setWorkspaceFiles([]);
   }, [isGroupChat]);
+
 
   useEffect(() => {
     if (!isGroupChat) {
@@ -164,7 +166,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     }
   };
 
-  const handleEvent = (event: ChatWindowEvent) => {
+  const handleSSEEvent = (event: ChatWindowEvent) => {
     switch (event.event) {
       case 'start':
         setSessionId(event.session_id);
@@ -174,7 +176,6 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setRoundGroupMembers(event.group_members ?? []);
         break;
       case 'select_speaker':
-        // 新一轮选人：结束上一轮可能未收到收尾 speaker 的流式气泡
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
@@ -232,6 +233,25 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
             };
             return next;
           }
+          // 没找到 streaming 消息：可能是 catchup 重放或 streaming 标记已被清理
+          // 查找该发言人最近一条消息，存在则原地更新，避免重复渲染
+          let lastSpeakerIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'speaker' && prev[i].speakerId === event.speaker_id) {
+              lastSpeakerIdx = i;
+              break;
+            }
+          }
+          if (lastSpeakerIdx !== -1) {
+            const next = [...prev];
+            next[lastSpeakerIdx] = {
+              ...next[lastSpeakerIdx],
+              title: event.speaker_name,
+              content: event.content,
+              streaming: false,
+            };
+            return next;
+          }
           return [
             ...prev,
             {
@@ -245,11 +265,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         });
         break;
       case 'speaker_finished':
-        // 发言轮结束：仅做收尾状态标记，不新增“超级助手”气泡
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
         setCurrentSpeaker(null);
+        setSubmitting(false);
         void refreshWorkspaceFiles();
         break;
       case 'finished':
@@ -265,6 +285,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           });
         }
         setCurrentSpeaker(null);
+        setSubmitting(false);
         void refreshWorkspaceFiles();
         break;
       default:
@@ -272,7 +293,47 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     }
   };
 
-  const sendMessage = async () => {
+  const handleEvent = (event: WSServerMessage) => {
+    if (event.event === 'catchup_round') {
+      // 断线重放：逐一处理缓冲事件
+      if (event.events && event.events.length > 0) {
+        event.events.forEach((e) => handleSSEEvent(e));
+      }
+      return;
+    }
+    if (event.event === 'error') {
+      console.error('[ChatWindow] 服务端错误:', event.message);
+      message.error(event.message || '服务端错误');
+      setSubmitting(false);
+      return;
+    }
+    if (event.event === 'pong') {
+      return;
+    }
+    handleSSEEvent(event as ChatWindowEvent);
+  };
+
+  // 用 ref 保持 handleEvent 引用最新，避免 WebSocket 回调中的闭包过期
+  const handleEventRef = useRef(handleEvent);
+  handleEventRef.current = handleEvent;
+
+  // WebSocket 连接管理
+  const loggedIn = isUserLoggedIn();
+
+  useEffect(() => {
+    if (!loggedIn) {
+      return;
+    }
+    chatWebSocket.connect(sessionId);
+    const unsub = chatWebSocket.onEvent((event) => handleEventRef.current(event));
+
+    return () => {
+      unsub();
+      chatWebSocket.disconnect();
+    };
+  }, [isGroupChat, loggedIn]);
+
+  const sendMessage = () => {
     const text = input.trim();
     if (!text || submitting) {
       return;
@@ -292,30 +353,26 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
     setInput('');
     setSubmitting(true);
-    try {
-      await chatWindowApi.streamChat(
-        {
-          user_message: text,
-          org_id: orgId,
-          session_id: sessionId,
-          round_id: null,
-          session_type: sessionType,
-          group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
-        },
-        handleEvent,
-      );
-    } catch (error) {
-      console.error(error);
-      message.error(error instanceof Error ? error.message : '对话请求失败，请检查后端服务');
-    } finally {
+
+    const sent = chatWebSocket.sendChat({
+      user_message: text,
+      org_id: orgId,
+      session_id: sessionId,
+      session_type: sessionType,
+      group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+    });
+    if (!sent) {
       setSubmitting(false);
     }
   };
 
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
   useEffect(() => {
     const selectedSessionId = searchParams.get('session_id');
     if (!selectedSessionId) {
-      // 未指定 session_id：视为“新建”，需要保证窗口干净
+      // 未指定 session_id：视为”新建”，需要保证窗口干净
       setSessionId(null);
       setCurrentSpeaker(null);
       setMessages([]);
@@ -323,9 +380,10 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       if (isGroupChat) {
         setRoundGroupMembers([]);
       }
+      chatWebSocket.setSessionId(null);
       return;
     }
-    if (selectedSessionId === sessionId) {
+    if (selectedSessionId === sessionIdRef.current) {
       return;
     }
     void (async () => {
@@ -349,10 +407,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
             setRoundGroupMembers([]);
           }
           setCurrentSpeaker(null);
+          chatWebSocket.setSessionId(null);
           return;
         }
 
         setSessionId(selectedSessionId);
+        chatWebSocket.setSessionId(selectedSessionId);
         if (isGroupChat) {
           setRoundGroupMembers([]);
         }
@@ -360,12 +420,14 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         await refreshWorkspaceFiles(selectedSessionId);
         const records = await sessionsApi.getMessages(selectedSessionId);
         setMessages((Array.isArray(records) ? records : []).map(toChatMessage));
+        // 请求断线重放：如果当前有活跃 round，拉取流式增量
+        chatWebSocket.sendCatchup(selectedSessionId);
       } catch (error) {
         console.error('加载会话消息失败', error);
         message.error(getBackendErrorMessage(error, '加载会话消息失败'));
       }
     })();
-  }, [searchParams, memberId, sessionId, sessionType, isGroupChat, navigate]);
+  }, [searchParams, memberId, sessionType, isGroupChat, navigate]);
 
   return (
     <Row gutter={[16, 16]} style={{ minHeight: 'calc(100vh - 140px)' }}>

@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     model_api_key: str
     model_base_url: str
     model_router_name: str
+    redis_url: str = "redis://localhost:6379/0"
+    minio_endpoint: str = "http://127.0.0.1:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "free-chat"
     # 与 user-service 一致，用于校验登录接口下发的 access_token
     jwt_secret_key: str = "free-chat"
     jwt_algorithm: str = "HS256"

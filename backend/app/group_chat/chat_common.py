@@ -1,7 +1,10 @@
 from enum import Enum
 from typing import Any, TypedDict
+from app.models.agent_log import AgentLog, AgentLogService
 from app.config import settings
 from app.models import Agent
+from langchain_core.callbacks import usage
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
@@ -83,12 +86,12 @@ class WindowState(TypedDict, total=False):
 
 
 def get_llm() -> ChatOpenAI:
-    print(settings)
     return ChatOpenAI(
         model=settings.model_router_name,
         api_key=settings.model_api_key,
         base_url=settings.model_base_url,
         temperature=0.2,
+        stream_usage=True
     )
 
 llm: ChatOpenAI = get_llm()
@@ -98,3 +101,44 @@ class NoSpeakerError(Exception):
     """无可用发言人异常"""
     def __init__(self, message: str):
         super().__init__(self.message)
+
+
+def save_token_usage(
+    ai_message: AIMessage,
+    window_state: WindowState,
+    *,
+    role_type: str = RoleType.AGENT_SELECTOR.value,
+):
+    """保存 token 用量（结构化输出调用返回的 raw AIMessage）"""
+
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    model_name = ""
+
+    usage_metadata = ai_message.usage_metadata
+    if usage_metadata:
+        input_tokens = usage_metadata.get("input_tokens", 0)
+        output_tokens = usage_metadata.get("output_tokens", 0)
+        total_tokens = usage_metadata.get("total_tokens", 0)
+
+    response_metadata = ai_message.response_metadata
+    if response_metadata:
+        token_usage = response_metadata.get("token_usage", {})
+        model_name = response_metadata.get("model_name", "")
+
+    row = AgentLog(
+        user_id=window_state["user_profile"]["member_id"],
+        session_id=window_state["session_id"],
+        round_id=window_state["round_id"],
+        content=ai_message.content,
+        role_type=role_type,
+        message_type=MsgType.MODEL.value,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        model_name=model_name,
+    )    
+    AgentLogService.save_agent_log(row)
+
+        

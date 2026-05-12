@@ -1,5 +1,5 @@
-from app.group_chat.chat_common import MsgType, RoleType, WindowState, llm
-from langchain_core.messages import ChatMessage, HumanMessage, SystemMessage
+from app.group_chat.chat_common import RoleType, WindowState, llm, save_token_usage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 
@@ -90,16 +90,22 @@ def select_speaker(window_state: WindowState,current_turn:int) -> SpeakerSelecti
     # 上一轮发言人
     previous_speaker_ = window_state.get("current_speaker", None)
     if previous_speaker_:
-        previous_speaker_text = f"- {previous_speaker_.get("id", "")}: {previous_speaker_.get("name", "")}\n"
+        previous_speaker_text = f"- {previous_speaker_.get('id', '')}: {previous_speaker_.get('name', '')}\n"
     else:
         previous_speaker_text = ""
 
     # 调用模型筛选
-    structured = llm.with_structured_output(SpeakerSelection)
+    structured = llm.with_structured_output(SpeakerSelection, include_raw=True)
     current_system_prompt = SYSTEM_PROMPT.format(agent_members=group_members_text, session_summary='', transcript=transcript_text, turn=current_turn, previous_speaker=previous_speaker_text, user_message=window_state.get("user_message", ""))
     messages = [
         SystemMessage(content=current_system_prompt),
         HumanMessage(content="挑选本轮发言人"),
     ]
-    decision = structured.invoke(messages)
+    result = structured.invoke(messages, config={"response_format": SpeakerSelection})
+
+    raw_data = result.get("raw", None)
+    if raw_data:
+        save_token_usage(raw_data, window_state, role_type=RoleType.SPEAKER_SELECTOR.value)
+
+    decision = result.get("parsed", None)
     return decision

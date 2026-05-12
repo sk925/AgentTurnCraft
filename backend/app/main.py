@@ -3,30 +3,40 @@ from typing import Any
 
 from app.group_chat import chat_window
 from app.config import settings
+from app.redis_client import init_redis, close_redis
 from app.schemas import ApiResponse, api_error_dict, success_response
 from app.session import router as session_router
+from app.graph_rag import router as graph_rag_router
 from app.workspace import workspace_files
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from scalar_fastapi import get_scalar_api_reference
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.database import init_db
+from app.group_chat.chat_graph import set_checkpointer
 from app.routers import agents, groups, skills
+from app.routers.upload_file_router import upload_file_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """生命周期管理"""
+    # 初始化数据库
     init_db()
     checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.database_url)
     checkpointer = await checkpointer_cm.__aenter__()
     await checkpointer.setup()
     app.state.checkpointer = checkpointer
     app.state.checkpointer_cm = checkpointer_cm
+    set_checkpointer(checkpointer)
+    await init_redis()
     try:
         yield
     finally:
+        await close_redis()
         await checkpointer_cm.__aexit__(None, None, None)
 
 
@@ -80,9 +90,16 @@ app.add_middleware(
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(groups.router, prefix="/api", tags=["groups"])
+app.include_router(upload_file_router, prefix="/api")
 app.include_router(chat_window.router, prefix="/api", tags=["chat_window"])
 app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files"])
 app.include_router(session_router, prefix="/api", tags=["sessions"])
+app.include_router(graph_rag_router.router, prefix="/api", tags=["graph_rag"])
+
+
+@app.get("/scalar", include_in_schema=False)
+def scalar_api_reference():
+    return get_scalar_api_reference(openapi_url=app.openapi_url, title=app.title)
 
 
 @app.get("/", response_model=ApiResponse[dict])

@@ -63,7 +63,7 @@
 }
 
 .portal-sider-nav {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   overflow-y: auto;
 }
@@ -98,6 +98,94 @@
   display: none;
 }
 
+/* 会话记录列表（侧栏菜单下方） */
+.portal-sider-sessions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--portal-sider-border);
+  margin: 0 10px;
+  padding: 6px 4px 4px;
+  overflow: hidden;
+}
+
+.portal-sider-sessions__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px 6px;
+  flex-shrink: 0;
+}
+
+.portal-sider-sessions__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--portal-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.portal-sider-sessions__new {
+  border: none;
+  background: transparent;
+  color: var(--portal-accent);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.portal-sider-sessions__new:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.portal-sider-sessions__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.portal-sider-sessions__empty {
+  font-size: 12px;
+  color: var(--portal-muted);
+  padding: 8px 8px;
+}
+
+.portal-sider-sessions__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--portal-text);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+  transition: background 0.12s;
+}
+.portal-sider-sessions__item:hover {
+  background: rgba(15, 23, 42, 0.05);
+}
+.portal-sider-sessions__item--active {
+  background: var(--portal-accent-soft);
+  color: var(--portal-accent);
+  font-weight: 600;
+}
+.portal-sider-sessions__item--active:hover {
+  background: rgba(37, 99, 235, 0.12);
+}
+
 .portal-sider-footer {
   padding: 12px 14px 20px;
   border-top: 1px solid var(--portal-sider-border);
@@ -114,96 +202,6 @@
   flex-direction: column;
 }
 
-/* 对话 / 群聊：最近会话横条 */
-.portal-session-strip {
-  border-bottom: 1px solid var(--portal-header-border);
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(8px);
-  padding: 10px 16px 12px;
-}
-
-.portal-session-strip__inner {
-  width: 100%;
-  margin: 0;
-  padding: 0 4px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.portal-session-strip__label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--portal-muted);
-  flex-shrink: 0;
-}
-
-.portal-session-scroll {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-}
-
-.portal-session-chip {
-  flex-shrink: 0;
-  border: 1px solid var(--portal-chip-border);
-  background: #fff;
-  color: var(--portal-text);
-  font-size: 13px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  max-width: 200px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.portal-session-chip:hover {
-  border-color: rgba(37, 99, 235, 0.35);
-  background: var(--portal-accent-soft);
-}
-
-.portal-session-chip--active {
-  border-color: rgba(37, 99, 235, 0.55);
-  background: var(--portal-accent-soft);
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
-  color: var(--portal-accent);
-  font-weight: 600;
-}
-
-.portal-session-new-btn {
-  flex-shrink: 0;
-  border: 1px dashed rgba(37, 99, 235, 0.45);
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--portal-accent);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 6px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.portal-session-new-btn:hover {
-  background: #fff;
-  border-style: solid;
-}
-
-.portal-session-empty {
-  font-size: 13px;
-  color: var(--portal-muted);
-}
 
 /* 主内容区 */
 .portal-content {

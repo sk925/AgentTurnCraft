@@ -1,4 +1,4 @@
-from app.group_chat.chat_common import MsgType, RoleType, WindowState
+from app.group_chat.chat_common import MsgType, RoleType, WindowState, save_token_usage
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from app.group_chat.chat_common import llm
@@ -60,8 +60,8 @@ class GroupSelection(BaseModel):
 
 def select_agent(window_state: WindowState) -> GroupSelection:
     """根据用户意图筛选可用的智能体"""
-    #structured = llm.with_structured_output(GroupSelection, include_raw=True)
-    structured = llm.with_structured_output(GroupSelection)
+    structured = llm.with_structured_output(GroupSelection, include_raw=True)
+    #structured = llm.with_structured_output(GroupSelection)
     # 可用成员列表
     agent_members_text = ""
     for agent in window_state.get("all_agents", []):
@@ -92,11 +92,17 @@ def select_agent(window_state: WindowState) -> GroupSelection:
         history_messages_text += f"</history_messages>\n"
         history_messages_text = history_messages_text.strip()
     prompt = SELECTOR_PROMPT.format(agent_members=agent_members_text, session_summary='', recent_messages=history_messages_text)
-    print(prompt)
+
     messages = [
         SystemMessage(content=prompt),
         HumanMessage(content=window_state.get("user_message", "")),
     ]
-    decision = structured.invoke(messages,config={"response_format": GroupSelection})
+    result = structured.invoke(messages,config={"response_format": GroupSelection})
+
+    raw_data = result.get("raw", None)
+    # 保存token使用量
+    if raw_data:
+        save_token_usage(raw_data, window_state)
+    decision = result.get("parsed", None)
     return decision
 

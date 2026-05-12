@@ -70,3 +70,7 @@ class Group(Base):
 
 
 Agent.groups = relationship('Group', secondary=group_agent, back_populates='agents')
+
+
+
+
