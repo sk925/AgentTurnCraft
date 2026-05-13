@@ -198,19 +198,59 @@
 }
 
 .portal-sider-footer {
-  padding: 12px 14px 20px;
+  padding: 12px 14px 18px;
   border-top: 1px solid var(--portal-sider-border);
   flex-shrink: 0;
   background: var(--portal-sider-bg);
 }
 
-.portal-sider-user {
+.portal-sider-footer__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 0;
+}
+
+.portal-sider-footer__inner--login {
+  padding-top: 0;
+}
+
+.portal-sider-footer__user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-sider-footer__avatar {
+  flex-shrink: 0;
+  background: linear-gradient(145deg, #3b82f6 0%, #2563eb 100%) !important;
+  color: #fff !important;
+}
+
+.portal-sider-footer__user-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.portal-sider-footer__name {
+  display: block;
+  width: 100%;
   font-size: 14px;
+  color: var(--portal-text);
+}
+
+.portal-sider-footer__logout-btn {
+  color: var(--portal-muted) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  background: rgba(15, 23, 42, 0.04) !important;
   font-weight: 500;
-  color: var(--portal-text, #0f172a);
-  padding: 8px 4px;
-  text-align: center;
-  line-height: 1.4;
+}
+
+.portal-sider-footer__logout-btn:hover {
+  color: #b91c1c !important;
+  border-color: rgba(185, 28, 28, 0.35) !important;
+  background: rgba(254, 226, 226, 0.55) !important;
 }
 
 /* 右侧主列 */
@@ -242,8 +282,12 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 12px 16px 32px 12px;
+  padding: 12px 16px 16px 12px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* 列表页通用 */

@@ -20,9 +20,10 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "free-chat"
-    # 与 user-service 一致，用于校验登录接口下发的 access_token
+    # 签发 / 校验 access_token（app.manage 认证与 app.auth JWT 解析共用）
     jwt_secret_key: str = "free-chat"
     jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24
 
 
 settings = Settings()

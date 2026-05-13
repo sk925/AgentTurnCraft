@@ -29,6 +29,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import {
+  chatPathForSessionType,
   chatWebSocket,
   chatWindowApi,
   getBackendErrorMessage,
@@ -36,11 +37,13 @@ import {
   goLoginPage,
   groupsApi,
   isUserLoggedIn,
+  requestOpenLoginModal,
   sessionsApi,
   uploadFileApi,
 } from '../api';
 import type { ChatWindowEvent, Group, SessionMessage, SessionType, WSServerMessage, WorkspaceArtifactFile } from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { usePortalSessions } from '../PortalSessionsContext';
 import './ChatWindow.css';
 
 const { TextArea } = Input;
@@ -207,6 +210,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const selectedSessionIdFromUrl = searchParams.get('session_id');
+  const hasSelectedSession = Boolean(selectedSessionIdFromUrl);
+  const { sessions: portalSessions, ready: portalSessionsReady } = usePortalSessions();
 
   const [orgId] = useState<number>(1);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -296,7 +302,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
 
   useEffect(() => {
-    if (!isGroupChat) {
+    if (!isGroupChat || !hasSelectedSession) {
       return;
     }
     void groupsApi
@@ -305,7 +311,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       .catch((error: unknown) => {
         message.error(getBackendErrorMessage(error, '加载群组列表失败'));
       });
-  }, [isGroupChat]);
+  }, [isGroupChat, hasSelectedSession]);
 
   const toChatMessage = (record: SessionMessage, index: number): ChatMessage => {
     if (record.role_type === 'user') {
@@ -362,6 +368,15 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       case 'start':
         setSessionId(event.session_id);
         void refreshWorkspaceFiles(event.session_id);
+        if (searchParams.get('session_id') !== event.session_id) {
+          navigate(
+            {
+              pathname: location.pathname,
+              search: `?session_id=${encodeURIComponent(event.session_id)}`,
+            },
+            { replace: true },
+          );
+        }
         break;
       case 'create_group':
         setRoundGroupMembers(event.group_members ?? []);
@@ -485,6 +500,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   };
 
   const handleEvent = (event: WSServerMessage) => {
+    if (event.event === 'authenticated') {
+      return;
+    }
     if (event.event === 'catchup_round') {
       // 断线重放：逐一处理缓冲事件
       if (event.events && event.events.length > 0) {
@@ -496,6 +514,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       console.error('[ChatWindow] 服务端错误:', event.message);
       message.error(event.message || '服务端错误');
       setSubmitting(false);
+      return;
+    }
+    if (event.event === 'auth_error') {
+      message.error(event.message || '登录已失效，请重新登录', 6);
+      setSubmitting(false);
+      requestOpenLoginModal(800);
       return;
     }
     if (event.event === 'pong') {
@@ -515,14 +539,15 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     if (!loggedIn) {
       return;
     }
-    chatWebSocket.connect(sessionId);
+    // 须先于 connect 注册：首包 auth 失败时服务端立即下发 auth_error 并关连接，否则 onmessage 时 callbacks 仍为空
     const unsub = chatWebSocket.onEvent((event) => handleEventRef.current(event));
+    chatWebSocket.connect(sessionId);
 
     return () => {
       unsub();
       chatWebSocket.disconnect();
     };
-  }, [isGroupChat, loggedIn]);
+  }, [isGroupChat, loggedIn, sessionId]);
 
   const sendMessage = () => {
     const text = input.trim();
@@ -642,6 +667,8 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   useEffect(() => {
     const selectedSessionId = searchParams.get('session_id');
+    const pathHere = location.pathname.startsWith('/group-chat') ? '/group-chat' : '/chat';
+
     if (!selectedSessionId) {
       // 未指定 session_id：视为”新建”，需要保证窗口干净
       setSessionId(null);
@@ -649,38 +676,48 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       setMessages([]);
       setWorkspaceFiles([]);
       setPendingAttachments([]);
-      if (isGroupChat) {
+      if (pathHere === '/group-chat') {
         setRoundGroupMembers([]);
       }
       chatWebSocket.setSessionId(null);
       return;
     }
+
+    if (!portalSessionsReady) {
+      return;
+    }
+
     if (selectedSessionId === sessionIdRef.current) {
       return;
     }
+
     void (async () => {
       if (!isUserLoggedIn() || memberId == null) {
         if (selectedSessionId) {
           message.warning('查看历史对话请先登录');
-          navigate(isGroupChat ? '/group-chat' : '/chat', { replace: true });
+          navigate(pathHere, { replace: true });
         }
         return;
       }
       try {
-        const allSessions = await sessionsApi.list(sessionType);
-        const exists = allSessions.some((item) => item.id === selectedSessionId);
-        if (!exists) {
+        const found = portalSessions.find((item) => item.id === selectedSessionId);
+        if (!found) {
           // 当前账号下无此会话：不再请求 messages，并清理 URL
-          navigate(isGroupChat ? '/group-chat' : '/chat', { replace: true });
+          navigate(pathHere, { replace: true });
           setSessionId(null);
           setMessages([]);
           setWorkspaceFiles([]);
           setPendingAttachments([]);
-          if (isGroupChat) {
+          if (pathHere === '/group-chat') {
             setRoundGroupMembers([]);
           }
           setCurrentSpeaker(null);
           chatWebSocket.setSessionId(null);
+          return;
+        }
+        const pathForSession = chatPathForSessionType(found.session_type);
+        if (pathForSession !== pathHere) {
+          navigate(`${pathForSession}?session_id=${encodeURIComponent(selectedSessionId)}`, { replace: true });
           return;
         }
 
@@ -701,11 +738,111 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         message.error(getBackendErrorMessage(error, '加载会话消息失败'));
       }
     })();
-  }, [searchParams, memberId, sessionType, isGroupChat, navigate]);
+  }, [searchParams, memberId, navigate, portalSessions, portalSessionsReady, location.pathname]);
+
+  const renderComposer = () => (
+    <div className="chat-composer">
+      <input
+        id={attachmentInputId}
+        type="file"
+        multiple
+        className="chat-file-input-sr"
+        tabIndex={-1}
+        disabled={uploadingAttachment || submitting || !isUserLoggedIn()}
+        aria-label="选择要上传的附件"
+        onChange={(e) => void onAttachmentFilesSelected(e)}
+      />
+      {pendingAttachments.length > 0 && (
+        <div className="chat-composer__attachments">
+          <div className="chat-composer__attachments-inner">
+            {pendingAttachments.map((f) => (
+              <UserAttachmentCard
+                key={f.id}
+                fileName={f.name}
+                mime={f.file_type || 'application/octet-stream'}
+                typeLabel={
+                  f.uploading ? '上传中' : f.type_label || friendlyFileTypeLabel(f.file_type || '', f.name)
+                }
+                uploading={f.uploading}
+                previewUrl={f.preview_url}
+                compact
+                onRemove={
+                  !f.uploading
+                    ? () => setPendingAttachments((prev) => prev.filter((x) => x.id !== f.id))
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      <TextArea
+        className="chat-composer__textarea"
+        value={input}
+        placeholder={
+          !isUserLoggedIn()
+            ? '请先登录后再发送消息'
+            : hasSelectedSession
+              ? '发消息或输入「/」选择技能（Shift+Enter 换行）'
+              : isGroupChat
+                ? '发送消息开始群聊（Shift+Enter 换行）'
+                : '发送消息开始对话（Shift+Enter 换行）'
+        }
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleComposerKeyDown}
+        disabled={submitting || !isUserLoggedIn()}
+        autoSize={{ minRows: 2, maxRows: 12 }}
+        variant="borderless"
+      />
+      <div className="chat-composer__toolbar chat-composer__toolbar--minimal">
+        <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
+          <span className="chat-composer__tooltip-anchor">
+            {!isUserLoggedIn() || submitting ? (
+              <span
+                className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
+                aria-disabled
+              >
+                <PlusOutlined />
+              </span>
+            ) : (
+              <label
+                htmlFor={attachmentInputId}
+                className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
+              >
+                {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
+              </label>
+            )}
+          </span>
+        </Tooltip>
+        <Tooltip title="发送（Enter）">
+          <span className="chat-composer__tooltip-anchor">
+            <button
+              type="button"
+              className={`chat-composer__send${submitting ? ' chat-composer__send--loading' : ''}`}
+              disabled={submitting || !isUserLoggedIn()}
+              onClick={() => void sendMessage()}
+              aria-label="发送"
+            >
+              {submitting ? <span className="chat-composer__spinner chat-composer__spinner--light" /> : <ArrowUpOutlined />}
+            </button>
+          </span>
+        </Tooltip>
+      </div>
+    </div>
+  );
+
+  if (!hasSelectedSession) {
+    return (
+      <div className="chat-idle-shell">
+        <div className="chat-idle-shell__composer">{renderComposer()}</div>
+      </div>
+    );
+  }
 
   return (
-    <Row gutter={[16, 16]} style={{ minHeight: 'calc(100vh - 140px)' }}>
-      {isGroupChat && (
+    <div className="chat-session-root">
+    <Row className="chat-session-row" gutter={[16, 16]} style={{ flex: 1, minHeight: 0, width: '100%' }}>
+      {isGroupChat && hasSelectedSession && (
         <Col xs={24} lg={5}>
           <Card
             className="portal-card"
@@ -765,136 +902,59 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           title={isGroupChat ? '群聊对话' : '对话'}
           style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
         >
-          <div ref={scrollPanelRef} className="chat-scroll-panel">
-            {chatMessages.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {chatMessages.map((item) => (
-                  <div key={item.id} className={`chat-row ${item.role === 'user' ? 'chat-row-self' : 'chat-row-speaker'}`}>
-                    {item.role === 'user' ? (
-                      <div className="chat-user-message-stack">
-                        {(item.attachments?.length ?? 0) > 0 && (
-                          <div className="chat-user-attachment-stack">
-                            {item.attachments!.map((a) => (
-                              <UserAttachmentCard
-                                key={a.id}
-                                fileName={a.file_name}
-                                mime={a.file_type}
-                                typeLabel={a.type_label}
-                                previewUrl={a.preview_url}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        {item.content ? (
-                          <div className="chat-bubble chat-bubble-self chat-bubble-self--neutral">
-                            <Typography.Text strong>我</Typography.Text>
-                            <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="chat-bubble chat-bubble-speaker">
-                        <Typography.Text strong>{item.title}</Typography.Text>
-                        <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                      </div>
-                    )}
-                  </div>
-                ))}
+          {chatMessages.length === 0 ? (
+            <div className="chat-empty-session">
+              <div className="chat-empty-session__inner">
+                <Empty className="chat-empty-session__hint" image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
+                {renderComposer()}
               </div>
-            )}
-          </div>
-
-          <div className="chat-composer">
-            <input
-              id={attachmentInputId}
-              type="file"
-              multiple
-              className="chat-file-input-sr"
-              tabIndex={-1}
-              disabled={uploadingAttachment || submitting || !isUserLoggedIn()}
-              aria-label="选择要上传的附件"
-              onChange={(e) => void onAttachmentFilesSelected(e)}
-            />
-            {pendingAttachments.length > 0 && (
-              <div className="chat-composer__attachments">
-                <div className="chat-composer__attachments-inner">
-                  {pendingAttachments.map((f) => (
-                    <UserAttachmentCard
-                      key={f.id}
-                      fileName={f.name}
-                      mime={f.file_type || 'application/octet-stream'}
-                      typeLabel={
-                        f.uploading
-                          ? '上传中'
-                          : f.type_label || friendlyFileTypeLabel(f.file_type || '', f.name)
-                      }
-                      uploading={f.uploading}
-                      previewUrl={f.preview_url}
-                      compact
-                      onRemove={
-                        !f.uploading
-                          ? () => setPendingAttachments((prev) => prev.filter((x) => x.id !== f.id))
-                          : undefined
-                      }
-                    />
+            </div>
+          ) : (
+            <>
+              <div ref={scrollPanelRef} className="chat-scroll-panel">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {chatMessages.map((item) => (
+                    <div key={item.id} className={`chat-row ${item.role === 'user' ? 'chat-row-self' : 'chat-row-speaker'}`}>
+                      {item.role === 'user' ? (
+                        <div className="chat-user-message-stack">
+                          {(item.attachments?.length ?? 0) > 0 && (
+                            <div className="chat-user-attachment-stack">
+                              {item.attachments!.map((a) => (
+                                <UserAttachmentCard
+                                  key={a.id}
+                                  fileName={a.file_name}
+                                  mime={a.file_type}
+                                  typeLabel={a.type_label}
+                                  previewUrl={a.preview_url}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {item.content ? (
+                            <div className="chat-bubble chat-bubble-self chat-bubble-self--neutral">
+                              <Typography.Text strong>我</Typography.Text>
+                              <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="chat-bubble chat-bubble-speaker">
+                          <Typography.Text strong>{item.title}</Typography.Text>
+                          <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
-            )}
-            <TextArea
-              className="chat-composer__textarea"
-              value={input}
-              placeholder={
-                isUserLoggedIn()
-                  ? '发消息或输入「/」选择技能（Shift+Enter 换行）'
-                  : '请先登录后再发送消息'
-              }
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              disabled={submitting || !isUserLoggedIn()}
-              autoSize={{ minRows: 2, maxRows: 12 }}
-              variant="borderless"
-            />
-            <div className="chat-composer__toolbar chat-composer__toolbar--minimal">
-              <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
-                <span className="chat-composer__tooltip-anchor">
-                  {!isUserLoggedIn() || submitting ? (
-                    <span
-                      className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
-                      aria-disabled
-                    >
-                      <PlusOutlined />
-                    </span>
-                  ) : (
-                    <label
-                      htmlFor={attachmentInputId}
-                      className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
-                    >
-                      {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
-                    </label>
-                  )}
-                </span>
-              </Tooltip>
-              <Tooltip title="发送（Enter）">
-                <span className="chat-composer__tooltip-anchor">
-                  <button
-                    type="button"
-                    className={`chat-composer__send${submitting ? ' chat-composer__send--loading' : ''}`}
-                    disabled={submitting || !isUserLoggedIn()}
-                    onClick={() => void sendMessage()}
-                    aria-label="发送"
-                  >
-                    {submitting ? <span className="chat-composer__spinner chat-composer__spinner--light" /> : <ArrowUpOutlined />}
-                  </button>
-                </span>
-              </Tooltip>
-            </div>
-          </div>
+
+              {renderComposer()}
+            </>
+          )}
         </Card>
       </Col>
 
+      {hasSelectedSession && (
       <Col xs={24} lg={6}>
         <Card className="portal-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
           {workspaceFiles.length === 0 ? (
@@ -915,6 +975,8 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           )}
         </Card>
       </Col>
+      )}
     </Row>
+    </div>
   );
 }

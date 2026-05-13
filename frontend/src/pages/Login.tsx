@@ -44,7 +44,7 @@ export default function LoginPage() {
           Free Chat 登录
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
-          认证接口：`user-service /api/auth/login`
+          认证接口：`POST /api/auth/login`（本服务 backend）
         </Typography.Paragraph>
         <Form layout="vertical" onFinish={(v) => void handleFinish(v)}>
           <Form.Item label="用户名" name="username" rules={[{ required: true, message: '请输入用户名' }]}>

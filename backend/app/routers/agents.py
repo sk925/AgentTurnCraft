@@ -3,7 +3,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser, get_current_user, get_current_user_id, get_current_user_optional
+from app.auth import CurrentUser, get_current_user, get_current_user_id
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.database import get_db
 from app.models import Agent, Skill
@@ -22,10 +22,10 @@ router = APIRouter()
 
 @router.get("/agents", response_model=ApiResponse[List[AgentResponse]])
 def get_agents(
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取智能体列表（可不登录：内置 + 已登录用户自己的）"""
+    """获取智能体列表（须登录：内置 + 当前用户自己的）"""
     agents = list_agents(db, current_user)
     return success_response(agents)
 
@@ -135,10 +135,10 @@ def remove_skill_from_agent(
 @router.get("/agents/{agent_id}", response_model=ApiResponse[AgentWithSkills])
 def get_agent_with_skills(
     agent_id: int,
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取智能体及其关联的技能（可不登录：仅可访问内置或本人数据）"""
+    """获取智能体及其关联的技能（须登录：仅可访问内置或本人数据）"""
     agent = get_agent_if_readable(db, agent_id, current_user)
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")

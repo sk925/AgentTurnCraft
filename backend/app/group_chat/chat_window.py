@@ -2,7 +2,9 @@ import asyncio
 import json
 from typing import Annotated, Any
 
-from app.auth import _decode_token, get_current_user_id
+from app.auth import get_current_user_id
+from app.manage.login_session import assert_user_login_session
+from app.manage.rbac_api import load_manage_user
 from app.group_chat.chat_common import SessionType, SpearkerRecord, WindowState
 from app.group_chat.chat_graph import get_checkpointer, get_window_graph
 from app.group_chat.event_publisher import EventPublisher
@@ -13,7 +15,7 @@ from app.models import Agent, Group
 from app.models.upload_file import UploadFile as UploadFileModel
 from app.session.service import get_or_create_session
 from app.utils import snowflake
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -23,6 +25,35 @@ from app.models.agent_log import AgentLogService
 
 
 router = APIRouter(prefix="/chat_window")
+
+# WebSocket 长连接期间定期重验令牌（秒）；到期/吊销/禁用时中断对话
+_WS_AUTH_RECHECK_INTERVAL_S = 8.0
+
+
+def _ws_close_reason(detail: object) -> str:
+    """WebSocket close reason 长度受限，截断为安全短串。"""
+    s = detail if isinstance(detail, str) else "认证失败"
+    return s[:120]
+
+
+def _http_exc_detail(exc: HTTPException) -> str:
+    d = exc.detail
+    return d if isinstance(d, str) else str(d)
+
+
+def verify_websocket_token(token: str, *, expected_member_id: int | None = None) -> int:
+    """校验 JWT、user_login 行未吊销、用户存在且启用。expected_member_id 传入时须与令牌 sub 一致。"""
+    db_verify = SessionLocal()
+    try:
+        uid = assert_user_login_session(db_verify, token)
+        if expected_member_id is not None and int(uid) != int(expected_member_id):
+            raise HTTPException(status_code=401, detail="令牌与用户不一致")
+        u = load_manage_user(db_verify, uid)
+        if u is None or not u.is_active:
+            raise HTTPException(status_code=401, detail="用户不存在或已禁用")
+        return int(uid)
+    finally:
+        db_verify.close()
 
 
 def _normalize_file_ids(raw: Any) -> list[int]:
@@ -179,12 +210,34 @@ async def _relay_redis_pubsub_to_websocket(
     publisher: EventPublisher,
     channel: str,
     send_lock: asyncio.Lock,
+    token: str,
+    member_id: int,
 ) -> None:
     """在独立任务中把 Redis 频道转发到 WebSocket，避免阻塞 receive_text 主循环。"""
     pubsub = publisher.redis.pubsub()
     await pubsub.subscribe(channel)
     try:
-        async for event in pubsub.listen():
+        while True:
+            event = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=_WS_AUTH_RECHECK_INTERVAL_S,
+            )
+            if event is None:
+                try:
+                    verify_websocket_token(token, expected_member_id=member_id)
+                except HTTPException as e:
+                    d = _http_exc_detail(e)
+                    try:
+                        async with send_lock:
+                            await websocket.send_json({"event": "auth_error", "message": d})
+                    except Exception:
+                        pass
+                    try:
+                        await websocket.close(code=4001, reason=_ws_close_reason(d))
+                    except Exception:
+                        pass
+                    return
+                continue
             if event["type"] != "message":
                 continue
             data = json.loads(event["data"])
@@ -227,25 +280,8 @@ async def window_chat(
 
 
 @router.websocket("/ws")
-async def chat_websocket(
-    websocket: WebSocket,
-    token: str = Query(None, description="JWT access token"),
-):
-    """WebSocket 端点：接收聊天消息、断线重放、心跳。
-    客户端连接时在 query string 传入 ?token=xxx 进行认证。
-    """
-    print(f"chat_websocket: {token}")
-    # 认证
-    if token is None:
-        await websocket.close(code=4001, reason="缺少认证令牌")
-        return
-    try:
-        current_user = _decode_token(token)
-        member_id = current_user.id
-    except HTTPException:
-        await websocket.close(code=4001, reason="令牌无效或已过期")
-        return
-
+async def chat_websocket(websocket: WebSocket):
+    """WebSocket 端点：先握手，首条客户端消息须为 JSON `{type:\"auth\", token:\"<JWT>\"}`，验过后再处理 chat/catchup/ping。"""
     await websocket.accept()
 
     publisher = EventPublisher()
@@ -262,15 +298,66 @@ async def chat_websocket(
         async with ws_send_lock:
             await websocket.send_json(payload)
 
+    # 首包鉴权（token 不出现在 URL，避免进访问日志）
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+    except asyncio.TimeoutError:
+        await send_ws({"event": "auth_error", "message": "认证超时，请重连"})
+        await websocket.close(code=4001, reason="认证超时")
+        return
+    except WebSocketDisconnect:
+        return
+
+    try:
+        first = json.loads(raw)
+    except json.JSONDecodeError:
+        await send_ws({"event": "auth_error", "message": "无效的 JSON 格式"})
+        await websocket.close(code=4001, reason="无效 JSON")
+        return
+
+    if not isinstance(first, dict) or first.get("type") != "auth":
+        await send_ws({
+            "event": "auth_error",
+            "message": '首条消息须为认证：{"type":"auth","token":"<访问令牌>"}',
+        })
+        await websocket.close(code=4001, reason="需要 auth")
+        return
+
+    token_raw = first.get("token")
+    if not token_raw or not str(token_raw).strip():
+        await send_ws({"event": "auth_error", "message": "缺少 token"})
+        await websocket.close(code=4001, reason="缺少 token")
+        return
+
+    token = str(token_raw).strip()
+
+    try:
+        member_id = verify_websocket_token(token)
+    except HTTPException as e:
+        detail = _http_exc_detail(e)
+        await send_ws({"event": "auth_error", "message": detail})
+        await websocket.close(code=4001, reason=_ws_close_reason(detail))
+        return
+
+    await send_ws({"event": "authenticated"})
+
     try:
         while True:
             raw = await websocket.receive_text()
-         
+
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 await send_ws({"event": "error", "message": "无效的 JSON 格式"})
                 continue
+
+            try:
+                verify_websocket_token(token, expected_member_id=member_id)
+            except HTTPException as e:
+                d = _http_exc_detail(e)
+                await send_ws({"event": "auth_error", "message": d})
+                await websocket.close(code=4001, reason=_ws_close_reason(d))
+                return
 
             msg_type = message.get("type")
 
@@ -311,17 +398,43 @@ async def chat_websocket(
                         _execute_chat_round(window_graph, window_state, config, publisher)
                     )
 
-                    # 将 Redis Pub/Sub 事件转发到 WebSocket
+                    # 将 Redis Pub/Sub 事件转发到 WebSocket（超时则重验令牌，过期或登出则中断）
+                    auth_failed = False
+                    auth_fail_detail: str | None = None
                     try:
-                        async for event in pubsub.listen():
-                            if event["type"] == "message":
-                                data = json.loads(event["data"])
-                                await send_ws(data)
-                                if data.get("event") in ("finished", "error"):
+                        while True:
+                            event = await pubsub.get_message(
+                                ignore_subscribe_messages=True,
+                                timeout=_WS_AUTH_RECHECK_INTERVAL_S,
+                            )
+                            if event is None:
+                                try:
+                                    verify_websocket_token(token, expected_member_id=member_id)
+                                except HTTPException as e:
+                                    task.cancel()
+                                    auth_failed = True
+                                    auth_fail_detail = _http_exc_detail(e)
                                     break
+                                continue
+                            if event.get("type") != "message":
+                                continue
+                            data = json.loads(event["data"])
+                            await send_ws(data)
+                            if data.get("event") in ("finished", "error"):
+                                break
                     finally:
                         await pubsub.unsubscribe(channel)
-                        await task  # 等待任务完成
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+
+                    if auth_failed:
+                        await publisher.set_round_status(session_id, round_id, "failed")
+                        await publisher.clear_active_round(session_id)
+                        await send_ws({"event": "auth_error", "message": auth_fail_detail or "认证失败"})
+                        await websocket.close(code=4001, reason=_ws_close_reason(auth_fail_detail))
+                        return
 
                     await publisher.set_round_status(session_id, round_id, "completed")
                     await publisher.clear_active_round(session_id)
@@ -358,7 +471,9 @@ async def chat_websocket(
                 if status == "running":
                     channel = publisher.channel_name(session_id, active_round)
                     asyncio.create_task(
-                        _relay_redis_pubsub_to_websocket(websocket, publisher, channel, ws_send_lock)
+                        _relay_redis_pubsub_to_websocket(
+                            websocket, publisher, channel, ws_send_lock, token, member_id
+                        )
                     )
 
             elif msg_type == "ping":

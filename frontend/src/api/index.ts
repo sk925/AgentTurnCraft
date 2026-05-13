@@ -5,8 +5,13 @@ const api = axios.create({
   baseURL: 'http://localhost:8000/api',
 });
 
-const USER_SERVICE_BASE_URL = 'http://localhost:8001/api';
 const USER_SERVICE_TOKEN_KEY = 'user_service_access_token';
+
+export const authApi = {
+  login: (payload: { username: string; password: string }) =>
+    api.post<LoginResponse>('/auth/login', payload).then((res) => res.data),
+  logout: () => api.post<{ message: string }>('/auth/logout').then((res) => res.data),
+};
 
 /** 解析后端 JSON：成功体为 { code, message, data }；错误体同样字段，优先读 message，兼容旧版 detail */
 export function extractBackendMessage(data: unknown): string | undefined {
@@ -90,7 +95,7 @@ export function getUserServiceToken(): string | null {
   return localStorage.getItem(USER_SERVICE_TOKEN_KEY);
 }
 
-/** 是否已保存 user-service 的 access_token（仅表示本地有令牌，有效性由后端校验） */
+/** 是否已保存 access_token（仅表示本地有令牌，有效性由后端校验） */
 export function isUserLoggedIn(): boolean {
   return Boolean(getUserServiceToken());
 }
@@ -108,6 +113,19 @@ export function setUserServiceToken(token: string): void {
 
 export function clearUserServiceToken(): void {
   localStorage.removeItem(USER_SERVICE_TOKEN_KEY);
+}
+
+/** App 侧监听后打开侧栏 `LoginModal`（与具体页面解耦） */
+export const OPEN_LOGIN_MODAL_EVENT = 'free-chat:open-login-modal';
+
+/** 在提示（如 `message.error`）展示后延迟打开登录弹窗 */
+export function requestOpenLoginModal(delayMs = 800): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent(OPEN_LOGIN_MODAL_EVENT));
+  }, delayMs);
 }
 
 function ensureArray<T>(value: unknown): T[] {
@@ -186,6 +204,15 @@ export interface ChatSession {
   create_at: string;
   token_use: number | null;
   session_type: SessionType | string;
+}
+
+/** 后端 `session_type` → 前端聊天路由（用于侧栏点击与 URL 对齐） */
+export function chatPathForSessionType(sessionType: string | undefined | null): '/chat' | '/group-chat' {
+  const t = String(sessionType ?? 'chat').toLowerCase();
+  if (t === 'group' || t === 'group_chat') {
+    return '/group-chat';
+  }
+  return '/chat';
 }
 
 export interface SessionMessageFileInfo {
@@ -420,10 +447,11 @@ export const uploadFileApi = {
 };
 
 export const sessionsApi = {
-  list: (sessionType: SessionType) =>
+  /** 不传 `sessionType` 时返回当前用户全部会话（与后端 `session_type` 查询参数省略一致） */
+  list: (sessionType?: SessionType) =>
     api
       .get<ApiResponse<ChatSession[]>>('/sessions', {
-        params: { session_type: sessionType },
+        params: sessionType != null ? { session_type: sessionType } : {},
       })
       .then((res) => ensureArray<ChatSession>(res.data?.data)),
   getMessages: (sessionId: string) =>
@@ -432,13 +460,9 @@ export const sessionsApi = {
       .then((res) => ensureArray<SessionMessage>(res.data?.data)),
 };
 
-export const authApi = {
-  login: (payload: { username: string; password: string }) =>
-    axios.post<LoginResponse>(`${USER_SERVICE_BASE_URL}/auth/login`, payload).then((res) => res.data),
-};
-
-/** WebSocket 消息协议 */
+/** WebSocket 消息协议（连接建立后须先发送 type: auth） */
 export type WSClientMessage =
+  | { type: 'auth'; token: string }
   | {
       type: 'chat';
       user_message: string;
@@ -454,9 +478,11 @@ export type WSClientMessage =
 export type WSServerMessage =
   | ChatWindowEvent
   | { event: 'connected'; session_id: string }
+  | { event: 'authenticated' }
   | { event: 'catchup_round'; round_id: string | null; events: ChatWindowEvent[]; status: string }
   | { event: 'pong' }
-  | { event: 'error'; message: string };
+  | { event: 'error'; message: string }
+  | { event: 'auth_error'; message: string };
 
 type WSEventCallback = (event: WSServerMessage) => void;
 
@@ -474,6 +500,10 @@ export class ChatWebSocket {
   private sessionId: string | null = null;
   private intentionalClose = false;
   private pendingMessages: WSClientMessage[] = [];
+  /** 服务端已对首包 auth 返回 authenticated 之前，业务消息先入队 */
+  private wsAuthenticated = false;
+  /** 本轮连接是否已通过 onmessage 提示过 auth_error（避免与 onclose 4001 重复弹窗） */
+  private authErrorNotified = false;
 
   /** 是否已连接 */
   isConnected(): boolean {
@@ -500,30 +530,27 @@ export class ChatWebSocket {
       return;
     }
 
-    const url = `${WS_BASE_URL}?token=${encodeURIComponent(token)}`;
-    this.ws = new WebSocket(url);
+    this.wsAuthenticated = false;
+    this.authErrorNotified = false;
+    this.ws = new WebSocket(WS_BASE_URL);
 
     this.ws.onopen = () => {
-      console.log('[ChatWebSocket] 已连接');
-      this.reconnectAttempts = 0;
-      this._startPing();
-
-      // 发送连接中缓存的消息（catchup 等）
-      const hasPendingCatchup = this.pendingMessages.some((m) => m.type === 'catchup');
-      while (this.pendingMessages.length > 0) {
-        const msg = this.pendingMessages.shift()!;
-        this.ws!.send(JSON.stringify(msg));
-      }
-
-      // 如果没有排队的 catchup，且设置了 session_id，自动补充
-      if (!hasPendingCatchup && this.sessionId) {
-        this._send({ type: 'catchup', session_id: this.sessionId });
-      }
+      console.log('[ChatWebSocket] 已连接，发送认证');
+      this.ws!.send(JSON.stringify({ type: 'auth', token }));
     };
 
     this.ws.onmessage = (event: MessageEvent<string>) => {
       try {
         const data = JSON.parse(event.data) as WSServerMessage;
+        if ('event' in data && data.event === 'authenticated') {
+          this.wsAuthenticated = true;
+          this.reconnectAttempts = 0;
+          this._startPing();
+          this._flushPendingAfterAuth();
+        }
+        if ('event' in data && data.event === 'auth_error') {
+          this.authErrorNotified = true;
+        }
         this.callbacks.forEach((cb) => cb(data));
       } catch {
         console.error('[ChatWebSocket] 解析服务端消息失败', event.data);
@@ -532,9 +559,10 @@ export class ChatWebSocket {
 
     this.ws.onclose = (event) => {
       console.log(`[ChatWebSocket] 连接关闭: code=${event.code} reason=${event.reason}`);
+      this.wsAuthenticated = false;
       this._stopPing();
       if (!this.intentionalClose) {
-        this._tryReconnect(event.code);
+        this._tryReconnect(event.code, event.reason);
       }
     };
 
@@ -546,6 +574,8 @@ export class ChatWebSocket {
   /** 断开连接 */
   disconnect() {
     this.intentionalClose = true;
+    this.wsAuthenticated = false;
+    this.authErrorNotified = false;
     this._stopPing();
     this.pendingMessages = [];
     if (this.reconnectTimer) {
@@ -594,8 +624,26 @@ export class ChatWebSocket {
     this.sessionId = sessionId;
   }
 
+  private _flushPendingAfterAuth() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const hadCatchup = this.pendingMessages.some((m) => m.type === 'catchup');
+    while (this.pendingMessages.length > 0) {
+      const msg = this.pendingMessages.shift()!;
+      this.ws.send(JSON.stringify(msg));
+    }
+    if (!hadCatchup && this.sessionId) {
+      this.ws.send(JSON.stringify({ type: 'catchup', session_id: this.sessionId }));
+    }
+  }
+
   private _send(message: WSClientMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      if (!this.wsAuthenticated) {
+        this.pendingMessages.push(message);
+        return;
+      }
       this.ws.send(JSON.stringify(message));
     } else if (this.ws?.readyState === WebSocket.CONNECTING) {
       this.pendingMessages.push(message);
@@ -623,11 +671,16 @@ export class ChatWebSocket {
     }
   }
 
-  private _tryReconnect(closeCode?: number) {
+  private _tryReconnect(closeCode?: number, closeReason?: string) {
     // 认证失败（4001）：不重连，提示用户重新登录
     if (closeCode === 4001) {
       console.error('[ChatWebSocket] 令牌无效或已过期，不重连');
-      this._notifyError('登录已过期，请重新登录');
+      if (!this.authErrorNotified) {
+        const detail = (closeReason && String(closeReason).trim()) || '登录已过期，请重新登录';
+        this._notifyError(detail);
+        requestOpenLoginModal(800);
+      }
+      this.authErrorNotified = false;
       return;
     }
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {

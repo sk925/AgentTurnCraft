@@ -15,7 +15,13 @@ from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from app.database import init_db
+from app.database import SessionLocal, init_db
+from app.manage.routers import auth as manage_auth
+from app.manage.routers import permissions as manage_permissions
+from app.manage.routers import roles as manage_roles
+from app.manage.routers import users as manage_users
+from app.manage.seed import seed_if_empty
+from app.manage.login_session import delete_expired_user_login_rows
 from app.group_chat.chat_graph import set_checkpointer
 from app.routers import agents, groups, skills
 from app.routers.upload_file_router import upload_file_router
@@ -24,8 +30,14 @@ from app.routers.upload_file_router import upload_file_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """生命周期管理"""
-    # 初始化数据库
+    # 初始化数据库（含 app.manage 用户/角色/权限表）
     init_db()
+    db = SessionLocal()
+    try:
+        seed_if_empty(db)
+        delete_expired_user_login_rows(db)
+    finally:
+        db.close()
     checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.database_url)
     checkpointer = await checkpointer_cm.__aenter__()
     await checkpointer.setup()
@@ -95,6 +107,10 @@ app.include_router(chat_window.router, prefix="/api", tags=["chat_window"])
 app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files"])
 app.include_router(session_router, prefix="/api", tags=["sessions"])
 app.include_router(graph_rag_router.router, prefix="/api", tags=["graph_rag"])
+app.include_router(manage_auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(manage_users.router, prefix="/api", tags=["users"])
+app.include_router(manage_roles.router, prefix="/api", tags=["roles"])
+app.include_router(manage_permissions.router, prefix="/api", tags=["permissions"])
 
 
 @app.get("/scalar", include_in_schema=False)

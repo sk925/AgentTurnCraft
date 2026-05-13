@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { TOKEN_KEY } from '../api/client';
+import { TOKEN_KEY, logout as apiLogout } from '../api/client';
 
 export function useAuthToken(): [boolean, () => void] {
   const [hasToken, setHasToken] = useState(() => !!localStorage.getItem(TOKEN_KEY));
 
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    setHasToken(false);
+    void apiLogout().finally(() => {
+      localStorage.removeItem(TOKEN_KEY);
+      setHasToken(false);
+    });
   }, []);
 
   useEffect(() => {

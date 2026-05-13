@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy import or_
 
-from app.auth import CurrentUser, get_current_user, get_current_user_id, get_current_user_optional
+from app.auth import CurrentUser, get_current_user, get_current_user_id
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.database import get_db
 from app.models import Agent, Group
@@ -23,10 +23,10 @@ router = APIRouter()
 
 @router.get("/groups", response_model=ApiResponse[List[GroupResponse]])
 def get_groups(
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取群组列表（可不登录：内置 + 已登录用户自己的）"""
+    """获取群组列表（须登录：内置 + 当前用户自己的）"""
     groups = list_groups(db, current_user)
     return success_response(groups)
 
@@ -116,10 +116,10 @@ def delete_group(group_id: int, user_id: Annotated[int, Depends(get_current_user
 @router.get("/groups/{group_id}", response_model=ApiResponse[GroupResponse])
 def get_group(
     group_id: int,
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取群组详情（可不登录：仅内置或本人数据）"""
+    """获取群组详情（须登录：仅内置或本人数据）"""
     group = get_group_if_readable(db, group_id, current_user)
     if not group:
         raise HTTPException(status_code=404, detail="群组不存在")

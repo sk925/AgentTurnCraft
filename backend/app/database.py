@@ -59,6 +59,8 @@ def _ensure_resource_type_columns() -> None:
 
 def init_db():
     from app.graph_rag import db_models as _graph_rag_db  # noqa: F401
+    from app.manage import models as _manage_models  # noqa: F401
+    from app.manage.models import user_login as _manage_user_login  # noqa: F401
     from app.models import agent_log as _agent_log  # noqa: F401
     from app.models import upload_file as _upload_file  # noqa: F401
 

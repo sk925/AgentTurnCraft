@@ -1,4 +1,8 @@
-"""可选登录下的资源可见性：内置(type=1)对所有人；自定义仅创建者（需登录且匹配 user_id）。"""
+"""资源可见性：内置对任意登录用户；自定义仅创建者。
+
+`/api/skills`、`/api/agents`、`/api/groups` 的列表与详情已依赖 `get_current_user`，未登录不会进入本层逻辑；
+`user is None` 分支仍保留，供内部或其它调用方复用。
+"""
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session

@@ -28,6 +28,10 @@ export async function login(username: string, password: string): Promise<TokenRe
   return data;
 }
 
+export async function logout(): Promise<void> {
+  await api.post('/api/auth/logout');
+}
+
 export async function fetchMe(): Promise<UserDto> {
   const { data } = await api.get<UserDto>('/api/users/me');
   return data;

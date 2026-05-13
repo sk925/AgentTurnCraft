@@ -3,7 +3,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser, get_current_user, get_current_user_id, get_current_user_optional
+from app.auth import CurrentUser, get_current_user, get_current_user_id
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.query_access import list_skills
 import os
@@ -19,10 +19,10 @@ router = APIRouter()
 
 @router.get("/skills", response_model=ApiResponse[List[SkillResponse]])
 def get_skills(
-    current_user: Annotated[CurrentUser | None, Depends(get_current_user_optional)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取技能列表（可不登录：仅内置 + 已登录用户自己的自定义）"""
+    """获取技能列表（须登录：内置 + 当前用户自己的自定义）"""
     skills = list_skills(db, current_user)
     return success_response(skills)
 

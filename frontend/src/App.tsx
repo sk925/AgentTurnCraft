@@ -1,24 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Button, Layout, Menu, message } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Avatar, Button, Layout, Menu, Popconfirm, Typography, message } from 'antd';
 import {
+  LogoutOutlined,
   MessageOutlined,
   PlusOutlined,
   RobotOutlined,
   TeamOutlined,
   ToolOutlined,
+  UserOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import LoginModal from './components/LoginModal';
+import { PortalSessionsProvider } from './PortalSessionsContext';
 import SkillsPage from './pages/Skills';
 import AgentsPage from './pages/Agents';
 import GroupsPage from './pages/Groups';
 import ChatWindowPage from './pages/ChatWindow';
 import LoginPage from './pages/Login';
 import {
+  authApi,
+  chatPathForSessionType,
+  clearUserServiceToken,
   getBackendErrorMessage,
   getCurrentUserIdFromToken,
+  getUserServiceToken,
   isUserLoggedIn,
+  OPEN_LOGIN_MODAL_EVENT,
   sessionsApi,
 } from './api';
 import type { ChatSession, SessionType } from './api';
@@ -36,17 +44,29 @@ function navSelectedKey(pathname: string): string {
   return pathname;
 }
 
+function sessionsMatchingChatMenu(sessionsList: ChatSession[], menuKey: '/chat' | '/group-chat'): ChatSession[] {
+  const wantGroup = menuKey === '/group-chat';
+  return sessionsList.filter((s) => {
+    const st = String(s.session_type ?? 'chat').toLowerCase();
+    const isGroup = st === 'group' || st === 'group_chat';
+    return wantGroup ? isGroup : !isGroup;
+  });
+}
+
 function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [sessionsReady, setSessionsReady] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   /** 登录成功后递增，触发会话列表与侧栏展示刷新 */
   const [authTick, setAuthTick] = useState(0);
 
   const currentSessionType: SessionType = location.pathname.startsWith('/group-chat') ? 'group' : 'chat';
   const isChatRoute =
-    location.pathname.startsWith('/chat') || location.pathname.startsWith('/group-chat');
+    location.pathname === '/' ||
+    location.pathname.startsWith('/chat') ||
+    location.pathname.startsWith('/group-chat');
 
   const menuItems = [
     { key: '/skills', icon: <ToolOutlined />, label: '技能' },
@@ -62,14 +82,13 @@ function AppLayout() {
       return;
     }
 
-    const targetSessionType: SessionType = key === '/group-chat' ? 'group' : 'chat';
     if (!isUserLoggedIn()) {
       navigate(key);
       return;
     }
+    const menuKey = key === '/group-chat' ? '/group-chat' : '/chat';
     try {
-      const targetSessions =
-        targetSessionType === currentSessionType ? sessions : await sessionsApi.list(targetSessionType);
+      const targetSessions = sessionsMatchingChatMenu(sessions, menuKey);
       if (targetSessions.length > 0) {
         navigate(`${key}?session_id=${targetSessions[0].id}`);
         return;
@@ -84,22 +103,57 @@ function AppLayout() {
   const loadSessions = useCallback(async () => {
     if (!isUserLoggedIn()) {
       setSessions([]);
+      setSessionsReady(true);
       return;
     }
+    setSessionsReady(false);
     try {
-      const data = await sessionsApi.list(currentSessionType);
+      const data = await sessionsApi.list();
       setSessions(data);
     } catch (error) {
       message.error(getBackendErrorMessage(error, '获取会话列表失败'));
+    } finally {
+      setSessionsReady(true);
     }
-  }, [currentSessionType]);
+  }, []);
 
   useEffect(() => {
     void loadSessions();
   }, [loadSessions, authTick]);
 
+  useEffect(() => {
+    const openLogin = () => setLoginModalOpen(true);
+    window.addEventListener(OPEN_LOGIN_MODAL_EVENT, openLogin);
+    return () => window.removeEventListener(OPEN_LOGIN_MODAL_EVENT, openLogin);
+  }, []);
+
+  const handleLogout = async () => {
+    const t = getUserServiceToken();
+    if (t) {
+      try {
+        await authApi.logout();
+      } catch {
+        /* 仍清理本地状态 */
+      }
+    }
+    clearUserServiceToken();
+    setSessions([]);
+    setSessionsReady(true);
+    setAuthTick((v) => v + 1);
+    if (isChatRoute) {
+      navigate(currentSessionType === 'group' ? '/group-chat' : '/chat', { replace: true });
+    }
+    message.success('已退出登录');
+  };
+
+  const portalSessionsValue = useMemo(
+    () => ({ sessions, ready: sessionsReady }),
+    [sessions, sessionsReady],
+  );
+
   return (
-    <Layout className="portal-shell" hasSider>
+    <PortalSessionsProvider value={portalSessionsValue}>
+      <Layout className="portal-shell" hasSider>
       <Sider width={236} breakpoint="lg" collapsedWidth={0} className="portal-sider" theme="light">
         <div className="portal-sider-brand" onClick={() => navigate('/chat')} role="presentation">
           <span className="portal-sider-brand__name">Free Chat</span>
@@ -117,17 +171,17 @@ function AppLayout() {
             />
           </div>
 
-          {/* 会话记录列表：对话/群聊页面时显示在菜单下方 */}
-          {isChatRoute && (
+          {/* 会话记录：已登录时始终展示，与当前菜单页无关；列表仅由登录态 / authTick 触发拉取 */}
+          {isUserLoggedIn() && (
             <div className="portal-sider-sessions">
               <div className="portal-sider-sessions__head">
-                <span className="portal-sider-sessions__label">
-                  {currentSessionType === 'group' ? '群聊记录' : '对话记录'}
-                </span>
+                <span className="portal-sider-sessions__label">会话记录</span>
                 <button
                   type="button"
                   className="portal-sider-sessions__new"
-                  onClick={() => navigate(currentSessionType === 'group' ? '/group-chat' : '/chat')}
+                  onClick={() =>
+                    navigate(location.pathname.startsWith('/group-chat') ? '/group-chat' : '/chat')
+                  }
                 >
                   <PlusOutlined />
                 </button>
@@ -135,11 +189,16 @@ function AppLayout() {
               <div className="portal-sider-sessions__list">
                 {sessions.length === 0 ? (
                   <span className="portal-sider-sessions__empty">
-                    {isUserLoggedIn() ? '暂无记录' : '登录后查看'}
+                    {sessionsReady ? '暂无记录' : '加载中…'}
                   </span>
                 ) : (
                   sessions.map((s) => {
-                    const active = new URLSearchParams(location.search).get('session_id') === s.id;
+                    const sid = new URLSearchParams(location.search).get('session_id');
+                    const here: '/chat' | '/group-chat' = location.pathname.startsWith('/group-chat')
+                      ? '/group-chat'
+                      : '/chat';
+                    const active =
+                      sid === s.id && chatPathForSessionType(s.session_type) === here;
                     return (
                       <button
                         key={s.id}
@@ -148,7 +207,7 @@ function AppLayout() {
                         title={s.title}
                         onClick={() =>
                           navigate(
-                            `${currentSessionType === 'group' ? '/group-chat' : '/chat'}?session_id=${s.id}`,
+                            `${chatPathForSessionType(s.session_type)}?session_id=${encodeURIComponent(s.id)}`,
                           )
                         }
                       >
@@ -164,13 +223,39 @@ function AppLayout() {
 
         <div className="portal-sider-footer">
           {isUserLoggedIn() ? (
-            <div className="portal-sider-user" title="当前登录用户">
-              用户{getCurrentUserIdFromToken() ?? '—'}
+            <div className="portal-sider-footer__inner">
+              <div className="portal-sider-footer__user-row">
+                <Avatar
+                  className="portal-sider-footer__avatar"
+                  size={40}
+                  icon={<UserOutlined />}
+                  aria-hidden
+                />
+                <div className="portal-sider-footer__user-text">
+                  <Typography.Text strong ellipsis className="portal-sider-footer__name">
+                    用户 {getCurrentUserIdFromToken() ?? '—'}
+                  </Typography.Text>
+                </div>
+              </div>
+              <Popconfirm
+                title="退出登录？"
+                description="退出后将清除本机保存的登录状态。"
+                okText="退出"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void handleLogout()}
+              >
+                <Button block icon={<LogoutOutlined />} className="portal-sider-footer__logout-btn" size="middle">
+                  退出登录
+                </Button>
+              </Popconfirm>
             </div>
           ) : (
-            <Button block type="primary" onClick={() => setLoginModalOpen(true)}>
-              登录
-            </Button>
+            <div className="portal-sider-footer__inner portal-sider-footer__inner--login">
+              <Button block type="primary" size="middle" onClick={() => setLoginModalOpen(true)}>
+                登录
+              </Button>
+            </div>
           )}
         </div>
         <LoginModal
@@ -198,6 +283,7 @@ function AppLayout() {
         </Content>
       </Layout>
     </Layout>
+    </PortalSessionsProvider>
   );
 }
 

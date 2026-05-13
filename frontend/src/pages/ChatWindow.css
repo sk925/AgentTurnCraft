@@ -2,9 +2,86 @@
   flex: 1;
   overflow-y: auto;
   margin-bottom: 12px;
-  max-height: 60vh;
   padding-right: 4px;
   min-height: 0;
+}
+
+/* 已选会话：三列随主内容区撑满视口，避免底部大块留白 */
+.chat-session-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.chat-session-root .chat-session-row.ant-row {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.chat-session-root .chat-session-row > .ant-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-session-root .chat-session-row .portal-card.ant-card {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* 未选会话：输入框在主区垂直居中 */
+.chat-idle-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  padding: 0 4px 8px;
+  box-sizing: border-box;
+}
+
+.chat-idle-shell__composer {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  flex: 0 0 auto;
+}
+
+.chat-idle-shell .chat-composer {
+  margin-top: 0;
+}
+
+/* 已选会话但尚无消息：空状态 + 输入框在卡片内垂直居中 */
+.chat-empty-session {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.chat-empty-session__inner {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.chat-empty-session__hint.ant-empty {
+  margin: 0;
+}
+
+.chat-empty-session .chat-composer {
+  margin-top: 0;
 }
 
 /* ---------- 参考「一体化输入框」：圆角容器 + 文本区 + 底栏 ---------- */
