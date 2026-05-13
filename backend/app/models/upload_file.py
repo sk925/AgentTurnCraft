@@ -1,4 +1,6 @@
-from app.database import Base
+from app.config import settings
+from app.database import Base, transactional_session
+from app.schemas import UploadFileResponse
 from app.utils.snowflake import get_snowflake_id
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, func
 from sqlalchemy.orm import Session
@@ -17,13 +19,21 @@ class UploadFile(Base):
 
 
 class UploadFileService:
-    def __init__(self, db: Session):
-        self.db = db
+    @staticmethod
+    def create_upload_file(upload_file: UploadFile) -> UploadFileResponse:
+        with transactional_session() as db:
+            if upload_file.id is None:
+                upload_file.id = get_snowflake_id()
+            db.add(upload_file)
+            upload_file_response = UploadFileResponse.model_validate(upload_file)
+            upload_file_response.preview_url = settings.minio_endpoint + "/" + settings.minio_bucket + "/" + upload_file.file_path
+            return upload_file_response
 
-    def create_upload_file(self, upload_file: UploadFile):
-        if upload_file.id is None:
-            upload_file.id = get_snowflake_id()
-        self.db.add(upload_file)
-        self.db.commit()
-        self.db.refresh(upload_file)
-        return upload_file
+    @staticmethod
+    def get_upload_file_by_id(file_id: int) -> UploadFile:
+        """根据文件ID获取文件"""
+        with transactional_session() as db:
+            upload_file = db.query(UploadFile).filter(UploadFile.id == file_id).first()
+            if upload_file:
+                db.expunge(upload_file)
+            return upload_file

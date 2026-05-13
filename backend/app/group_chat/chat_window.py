@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, Any
 
 from app.auth import _decode_token, get_current_user_id
 from app.group_chat.chat_common import SessionType, SpearkerRecord, WindowState
@@ -10,22 +10,66 @@ from sqlalchemy import or_
 
 from app.constants import RESOURCE_TYPE_BUILTIN
 from app.models import Agent, Group
+from app.models.upload_file import UploadFile as UploadFileModel
 from app.session.service import get_or_create_session
 from app.utils import snowflake
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 from app.database import SessionLocal, get_db
+from app.models.agent_log import AgentLogService
 
 
 router = APIRouter(prefix="/chat_window")
 
 
+def _normalize_file_ids(raw: Any) -> list[int]:
+    """解析 WebSocket / JSON 中的 file_ids（支持 int 或字符串形式的雪花 id）。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[int] = []
+    for item in raw:
+        if item is None:
+            continue
+        try:
+            out.append(int(str(item).strip()))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _build_attachment_context(db: Session, member_id: int, file_ids: list[int]) -> str:
+    """按 id 拉取当前用户可见的上传文件元数据，供发言人 prompt 使用（不含文件正文）。"""
+    if not file_ids:
+        return ""
+    rows = (
+        db.query(UploadFileModel)
+        .filter(UploadFileModel.id.in_(file_ids), UploadFileModel.user_id == member_id)
+        .all()
+    )
+    if not rows:
+        return ""
+    by_id = {int(r.id): r for r in rows}
+    lines = [
+        "## 本轮用户附件（仅元数据；正文请通过工具按 file_id 读取）",
+    ]
+    for fid in file_ids:
+        r = by_id.get(int(fid))
+        if r:
+            lines.append(
+                f"- file_id: {r.id}\n  file_name: {r.file_name}\n  file_type: {r.file_type}\n  file_size: {r.file_size} bytes"
+            )
+    return "\n".join(lines)
+
+
 class WindowChatRequest(BaseModel):
     """窗口聊天请求"""
-    user_message: str
+
+    user_message: str = ""
     org_id: int
     session_id: str | None
     round_id: str | None
@@ -39,6 +83,14 @@ class WindowChatRequest(BaseModel):
         description="文件ID列表",
     )
 
+    @field_validator("file_ids", mode="before")
+    @classmethod
+    def _coerce_file_ids(cls, v: Any) -> list[int] | None:
+        if v is None:
+            return None
+        parsed = _normalize_file_ids(v)
+        return parsed or None
+
 
 def _build_window_state(
     window_chat_request: WindowChatRequest,
@@ -50,11 +102,20 @@ def _build_window_state(
     session_id = window_chat_request.session_id
     if not session_id:
         session_id = str(snowflake.get_snowflake_id())
+
+    file_ids = _normalize_file_ids(window_chat_request.file_ids)
+    attachment_context = _build_attachment_context(db, member_id, file_ids) if file_ids else ""
+
+    raw_user_message = (window_chat_request.user_message or "").strip()
+    effective_user_message = raw_user_message
+    if not effective_user_message and file_ids:
+        effective_user_message = "请根据我上传的附件处理。"
+
     get_or_create_session(
         db=db,
         session_id=session_id,
         member_id=member_id,
-        user_message=window_chat_request.user_message,
+        user_message=raw_user_message or effective_user_message,
         session_type=window_chat_request.session_type.value,
     )
 
@@ -93,12 +154,23 @@ def _build_window_state(
     window_state: WindowState = {
         "session_id": session_id,
         "round_id": round_id,
-        "user_message": window_chat_request.user_message,
+        "user_message": effective_user_message,
+        "file_ids": file_ids,
+        "attachment_context": attachment_context,
         "member_id": member_id,
         "all_agents": all_agents_data,
         "user_profile": {"member_id": member_id, "org_id": window_chat_request.org_id, "member_role": "STUDENT"},
     }
     window_graph: CompiledStateGraph = get_window_graph(checkpointer)
+
+    AgentLogService.save_user_question(
+        user_id=member_id,
+        session_id=session_id,
+        round_id=str(round_id),
+        content=raw_user_message,
+        file_ids=file_ids if file_ids else None,
+    )
+
     return window_state, window_graph, config
 
 
@@ -207,12 +279,13 @@ async def chat_websocket(
                 db = SessionLocal()
                 try:
                     window_chat_request = WindowChatRequest(
-                        user_message=message["user_message"],
+                        user_message=message.get("user_message") or "",
                         org_id=message.get("org_id", 1),
                         session_id=message.get("session_id"),
                         round_id=None,
                         session_type=message.get("session_type", "chat"),
                         group_id=message.get("group_id"),
+                        file_ids=_normalize_file_ids(message.get("file_ids")) or None,
                     )
                     try:
                         window_state, window_graph, config = _build_window_state(

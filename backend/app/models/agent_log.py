@@ -41,6 +41,30 @@ class AgentLogService:
             session.add(agent_log)
 
     @staticmethod
+    def save_user_question(
+        *,
+        user_id: int,
+        session_id: str,
+        round_id: str,
+        content: str,
+        file_ids: list[int] | None = None,
+    ) -> None:
+        """保存用户本轮提问；携带附件时，将 file_id 列表写入 file_list（JSON 数组）。"""
+        fl: list[int] | None = None
+        if file_ids:
+            fl = [int(x) for x in file_ids]
+        row = AgentLog(
+            user_id=user_id,
+            session_id=str(session_id),
+            round_id=str(round_id),
+            role_type="user",
+            message_type="user",
+            content=content or "",
+            file_list=fl,
+        )
+        AgentLogService.save_agent_log(row)
+
+    @staticmethod
     async def save_model_message(
         user_id: int,
         session_id: str,
@@ -89,7 +113,7 @@ class AgentLogService:
                         'tool_args': tool_call['args'],
                         'tool_id': tool_call['id'],
                     })
-            print(tool_calls)
+            model_name = (getattr(message, 'response_metadata', None) or {}).get('model_name', '')
             row = AgentLog(
                 user_id=user_id,
                 session_id=session_id,
@@ -103,6 +127,7 @@ class AgentLogService:
                 tool_calls=tool_calls if tool_calls else None,
                 speaker_id=current_speaker.get('id'),
                 speaker_name=current_speaker.get('name'),
+                model_name=model_name,
             )
         with transactional_session() as session:
             session.add(row)

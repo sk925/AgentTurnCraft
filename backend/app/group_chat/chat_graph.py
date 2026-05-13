@@ -148,8 +148,14 @@ def build_graph(checkpointer) -> CompiledStateGraph:
             for m in history_messages
             if m.get("role_type") in {RoleType.USER.value, RoleType.SPEAKER.value, RoleType.USER, RoleType.SPEAKER}
         ][-6:]
+        base_user = window_state.get("user_message", "")
+        att = (window_state.get("attachment_context") or "").strip()
+        if att:
+            user_for_speaker = f"{base_user}\n\n{att}"
+        else:
+            user_for_speaker = base_user
         context = {
-            "user_message": window_state.get("user_message", ""),
+            "user_message": user_for_speaker,
             "session_id": window_state.get("session_id"),
             "round_id": window_state.get("round_id"),
             "user_profile": window_state.get("user_profile", {}),
@@ -157,7 +163,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
             "speaker_id": current_speaker.get("id"),
             "history_messages": history_messages,
             "group_members": window_state.get("group_members", []),
-            "speaker_prompt": speaker_prompt
+            "speaker_prompt": speaker_prompt,
         }
 
         last_updates = None

@@ -3,11 +3,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile as FastAPIUploadFile
 from minio.error import S3Error
-from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, get_current_user
 from app.config import settings
-from app.database import get_db
 from app.models.upload_file import UploadFile as UploadFileModel
 from app.models.upload_file import UploadFileService
 from app.schemas import ApiResponse, UploadFileResponse, success_response
@@ -29,7 +27,6 @@ def _safe_filename(name: str) -> str:
 async def upload_user_file(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     file: FastAPIUploadFile = File(...),
-    db: Session = Depends(get_db),
 ):
     """上传文件到 MinIO，并写入 upload_file 表。"""
     raw_name = file.filename or "unnamed"
@@ -62,8 +59,10 @@ async def upload_user_file(
         file_type=content_type,
         file_size=len(data),
     )
-    svc = UploadFileService(db)
-    svc.create_upload_file(row)
+    upload_file_response = UploadFileService.create_upload_file(row)
 
-    
-    return success_response(UploadFileResponse.model_validate(row), message="上传成功")
+
+    return success_response(upload_file_response, message="上传成功")
+
+
+ 

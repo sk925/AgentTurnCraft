@@ -153,6 +153,20 @@ export interface ChatWindowRequest {
   session_type?: SessionType;
   /** 群聊：指定后候选与入群智能体仅来自该群组 */
   group_id?: number | null;
+  /** 本轮上传文件 id（字符串避免大整数精度丢失） */
+  file_ids?: string[] | null;
+}
+
+/** 与后端 UploadFileResponse 一致，id 为字符串 */
+export interface UploadFileRecord {
+  id: string;
+  user_id: number;
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  file_size: number;
+  create_time?: string;
+  preview_url?: string | null;
 }
 
 export type SessionType = 'group' | 'ppt' | 'chat';
@@ -174,12 +188,20 @@ export interface ChatSession {
   session_type: SessionType | string;
 }
 
+export interface SessionMessageFileInfo {
+  file_id: string;
+  file_name: string;
+  file_url: string;
+  file_type?: string;
+}
+
 export interface SessionMessage {
   role_type: 'user' | 'agent_selector' | 'speaker_selector' | 'speaker' | 'assistant';
   message_type: string | null;
   message_content: string;
   speaker_id: number | null;
   speaker_name: string | null;
+  file_info?: SessionMessageFileInfo[] | null;
 }
 
 export interface ChatStartEvent {
@@ -383,6 +405,20 @@ export const chatWindowApi = {
   },
 };
 
+export const uploadFileApi = {
+  /** multipart 上传，与主站 axios 同源、自动带 Authorization */
+  upload: async (file: File): Promise<UploadFileRecord> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await api.post<ApiResponse<UploadFileRecord>>('/upload_file', fd);
+    const body = res.data;
+    if (body.code !== 0 || body.data == null) {
+      throw new Error(body.message || '上传失败');
+    }
+    return body.data;
+  },
+};
+
 export const sessionsApi = {
   list: (sessionType: SessionType) =>
     api
@@ -403,7 +439,15 @@ export const authApi = {
 
 /** WebSocket 消息协议 */
 export type WSClientMessage =
-  | { type: 'chat'; user_message: string; org_id: number; session_id?: string | null; session_type?: SessionType; group_id?: number | null }
+  | {
+      type: 'chat';
+      user_message: string;
+      org_id: number;
+      session_id?: string | null;
+      session_type?: SessionType;
+      group_id?: number | null;
+      file_ids?: string[] | null;
+    }
   | { type: 'catchup'; session_id: string }
   | { type: 'ping' };
 
@@ -430,7 +474,6 @@ export class ChatWebSocket {
   private sessionId: string | null = null;
   private intentionalClose = false;
   private pendingMessages: WSClientMessage[] = [];
-  private lastCloseCode: number | null = null;
 
   /** 是否已连接 */
   isConnected(): boolean {
@@ -442,7 +485,6 @@ export class ChatWebSocket {
     this.sessionId = sessionId ?? null;
     this.intentionalClose = false;
     this.pendingMessages = [];
-    this.lastCloseCode = null;
 
     // 关闭已有连接
     if (this.ws) {
@@ -491,7 +533,6 @@ export class ChatWebSocket {
     this.ws.onclose = (event) => {
       console.log(`[ChatWebSocket] 连接关闭: code=${event.code} reason=${event.reason}`);
       this._stopPing();
-      this.lastCloseCode = event.code;
       if (!this.intentionalClose) {
         this._tryReconnect(event.code);
       }
@@ -524,6 +565,7 @@ export class ChatWebSocket {
     session_id?: string | null;
     session_type?: SessionType;
     group_id?: number | null;
+    file_ids?: string[] | null;
   }): boolean {
     if (!this.isConnected()) {
       this._notifyError('连接未就绪，消息发送失败');

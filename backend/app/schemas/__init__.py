@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Generic, Optional, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 T = TypeVar("T")
 
@@ -92,12 +92,19 @@ class GroupResponse(GroupBase):
 
 
 class UploadFileResponse(BaseModel):
-    id: int
+    """上传成功返回；id 使用字符串避免超过 JS Number 安全整数时前端精度丢失。"""
+
+    id: str
     user_id: int
     file_name: str
     file_path: str
     file_type: str
     file_size: int
-    create_time: datetime
+    preview_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _id_to_str(cls, v: Any) -> str:
+        return str(v) if v is not None else ""

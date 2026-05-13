@@ -35,7 +35,18 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: auto;
+  min-height: 0;
+  /* 由内部区域各自滚动，避免整栏滚动导致底部用户区无法贴底 */
+  overflow: hidden;
+}
+
+/* 菜单 + 可选会话列表：占满品牌与页脚之间的空间，保证页脚始终贴视口底 */
+.portal-sider-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .portal-sider-brand {
@@ -191,6 +202,15 @@
   border-top: 1px solid var(--portal-sider-border);
   flex-shrink: 0;
   background: var(--portal-sider-bg);
+}
+
+.portal-sider-user {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--portal-text, #0f172a);
+  padding: 8px 4px;
+  text-align: center;
+  line-height: 1.4;
 }
 
 /* 右侧主列 */

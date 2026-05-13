@@ -149,3 +149,19 @@ def upload_bytes(
         client=client,
         ensure_bucket=ensure_bucket,
     )
+
+
+def download_bytes(
+    bucket: str,
+    object_name: str,
+    *,
+    client: Minio | None = None,
+) -> bytes:
+    """从 MinIO 读取对象为完整 bytes。"""
+    c = client or get_minio_client()
+    resp = c.get_object(bucket, object_name)
+    try:
+        return resp.read()
+    finally:
+        resp.close()
+        resp.release_conn()

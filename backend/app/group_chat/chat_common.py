@@ -68,6 +68,11 @@ class UserProfile(TypedDict):
 class WindowState(TypedDict, total=False):
     """本轮对话窗口状态"""
     user_message: str
+    """本轮用户原始文案（与请求一致；发言人侧可另拼 attachment_context）。"""
+    file_ids: list[int]
+    """本轮用户上传的文件 id，仅用于状态传递与工具。"""
+    attachment_context: str
+    """本轮附件元数据说明，仅注入发言人上下文。"""
     all_agents: list[dict[str, Any]]
     group_members: list[dict[str, Any]]
     select_reason: str # 筛选依据

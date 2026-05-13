@@ -17,6 +17,7 @@ from app.group_chat.chat_common import (
 from app.group_chat.event_publisher import EventPublisher
 from app.models import Agent
 from app.tools.ask_user import ask_user_question
+from app.tools.parse_file import parse_file_by_id
 from langchain.agents.middleware import ModelRequest
 from langchain.agents.middleware.types import dynamic_prompt
 from langgraph.graph.state import CompiledStateGraph
@@ -179,7 +180,6 @@ def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
     
     final_prompt = base_rule_prompt + "\n" + deep_agent_inner_prompt + "\n" + user_custom_prompt + "\n" + scene_description_prompt
 
-    print(f"final_prompt={final_prompt}")
     return final_prompt
 
 
@@ -198,7 +198,7 @@ def make_project_backend(_runtime: Any) -> LocalShellBackend:
         inherit_env=True,
     )
 
-def speak_agent(window_state: WindowState, checkpointer: Any) -> CompiledStateGraph:
+def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledStateGraph, str]:
     """创建发言人智能体"""
     current_speaker = window_state.get("current_speaker", {})
 
@@ -212,8 +212,7 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> CompiledStateGr
     cache_key = (current_agent_info['id'], id(checkpointer))
     compiled_graph = speaker_agent_map.get(cache_key)
     if compiled_graph is not None:
-        return compiled_graph
-        
+        return compiled_graph, current_agent_info['prompt']
 
     with _speaker_agent_lock:
         # 双重检查，避免其他线程已创建
@@ -221,7 +220,7 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> CompiledStateGr
         if compiled_graph is None:
             compiled_graph = create_deep_agent(model=llm, 
                                            system_prompt="", 
-                                           tools=[ask_user_question],
+                                           tools=[ask_user_question,parse_file_by_id],
                                            skills=[],
                                            middleware=[format_wrap_prompt],
                                            context_schema=SpeakContext,

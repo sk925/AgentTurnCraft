@@ -4,6 +4,183 @@
   margin-bottom: 12px;
   max-height: 60vh;
   padding-right: 4px;
+  min-height: 0;
+}
+
+/* ---------- 参考「一体化输入框」：圆角容器 + 文本区 + 底栏 ---------- */
+.chat-composer {
+  margin-top: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.chat-composer__attachments {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.chat-composer__attachments-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.chat-composer__attachments-inner .chat-attachment-card {
+  flex: 1 1 200px;
+  max-width: 100%;
+}
+
+.chat-composer__textarea.ant-input {
+  padding: 14px 16px 10px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #0f172a;
+  resize: none !important;
+}
+
+.chat-composer__textarea.ant-input::placeholder {
+  color: #94a3b8;
+}
+
+.chat-composer__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #fafbff 0%, #fff 100%);
+  flex-wrap: nowrap;
+}
+
+.chat-composer__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #334155;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-composer__icon-btn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+}
+
+.chat-composer__icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-composer__icon-btn--plus {
+  font-weight: 500;
+}
+
+.chat-composer__toolbar--minimal {
+  justify-content: space-between;
+}
+
+/* 屏幕外占位：避免父级 overflow 裁剪；用 label+htmlFor 触发，勿依赖 input.click() */
+.chat-file-input-sr {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+label.chat-composer__icon-btn--plus {
+  cursor: pointer;
+  margin: 0;
+}
+
+.chat-composer__icon-btn--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-composer__icon-btn--busy {
+  pointer-events: none;
+}
+
+.chat-composer__tooltip-anchor {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.chat-composer__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.chat-composer__send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+}
+
+.chat-composer__send:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.chat-composer__send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.chat-composer__send--loading {
+  pointer-events: none;
+}
+
+.chat-composer__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(37, 99, 235, 0.25);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: chat-composer-spin 0.7s linear infinite;
+}
+
+.chat-composer__spinner--light {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+@keyframes chat-composer-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-row {
@@ -40,4 +217,142 @@
 .chat-paragraph {
   white-space: pre-wrap;
   margin-bottom: 0;
+}
+
+/* 用户侧：附件卡片 + 文案（参考浅灰圆角条） */
+.chat-user-message-stack {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat-user-attachment-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f3f4f6;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-sizing: border-box;
+  position: relative;
+  padding-inline-end: 36px;
+}
+
+.chat-attachment-card--clickable {
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-attachment-card--clickable:hover {
+  background: #e5e7eb;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.chat-attachment-card--clickable:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.chat-attachment-card__icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.chat-attachment-card__loading-icon {
+  font-size: 20px;
+  color: #2563eb;
+}
+
+.chat-attachment-card__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-attachment-card__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #0f172a;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-card__type {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  line-height: 1.3;
+}
+
+.chat-attachment-card__remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.chat-attachment-card__remove:hover {
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+}
+
+.chat-attachment-card--compact {
+  padding: 8px 10px;
+  max-width: min(320px, 100%);
+  gap: 10px;
+  padding-inline-end: 32px;
+}
+
+.chat-attachment-card--compact .chat-attachment-card__icon {
+  width: 32px;
+  height: 32px;
+}
+
+.chat-attachment-card--compact .chat-attachment-card__name {
+  font-size: 13px;
+}
+
+.chat-attachment-card--compact .chat-attachment-card__type {
+  font-size: 11px;
+}
+
+.chat-bubble-self--neutral {
+  background: #f3f4f6;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
