@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from typing import Annotated, Any
 
 from app.auth import get_current_user_id
@@ -26,8 +27,24 @@ from app.models.agent_log import AgentLogService
 
 router = APIRouter(prefix="/chat_window")
 
+logger = logging.getLogger(__name__)
+
+
+def _consume_task_exception(task: asyncio.Task) -> None:
+    """避免 fire-and-forget 任务异常未被 retrieve 时 asyncio 报 Task exception was never retrieved。"""
+    if not task.done() or task.cancelled():
+        return
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
 # WebSocket 长连接期间定期重验令牌（秒）；到期/吊销/禁用时中断对话
 _WS_AUTH_RECHECK_INTERVAL_S = 8.0
+
+# 单成员发言结束时 _execute_chat_round 只发 speaker_finished（不发 finished），内层 pubsub 循环须据此退出以继续 receive_text
+_WS_ROUND_DONE_EVENTS = frozenset({"finished", "error", "speaker_finished"})
 
 
 def _ws_close_reason(detail: object) -> str:
@@ -177,6 +194,7 @@ def _build_window_state(
             "name": agent.name,
             "description": agent.description,
             "prompt": agent.prompt,
+            "chat_model_id": agent.chat_model_id,
         }
         for agent in all_agents
     ]
@@ -231,22 +249,42 @@ async def _relay_redis_pubsub_to_websocket(
                         async with send_lock:
                             await websocket.send_json({"event": "auth_error", "message": d})
                     except Exception:
-                        pass
+                        logger.debug(
+                            "relay: send_json auth_error failed",
+                            exc_info=True,
+                        )
                     try:
                         await websocket.close(code=4001, reason=_ws_close_reason(d))
                     except Exception:
-                        pass
+                        logger.debug(
+                            "relay: close after auth_error failed",
+                            exc_info=True,
+                        )
                     return
                 continue
             if event["type"] != "message":
                 continue
-            data = json.loads(event["data"])
+            try:
+                data = json.loads(event["data"])
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(
+                    "relay: invalid Redis message on %s: %s",
+                    channel,
+                    e,
+                    exc_info=True,
+                )
+                continue
             try:
                 async with send_lock:
                     await websocket.send_json(data)
             except Exception:
+                logger.info(
+                    "relay: WebSocket send_json failed, stop relay on %s",
+                    channel,
+                    exc_info=True,
+                )
                 break
-            if data.get("event") in ("finished", "error"):
+            if data.get("event") in _WS_ROUND_DONE_EVENTS:
                 break
     finally:
         await pubsub.unsubscribe(channel)
@@ -274,7 +312,10 @@ async def window_chat(
     await publisher.set_round_status(session_id, round_id, "running")
 
     # 后台执行（不等待），通过 Redis 下发事件
-    asyncio.create_task(_execute_chat_round(window_graph, window_state, config, publisher))
+    task = asyncio.create_task(
+        _execute_chat_round(window_graph, window_state, config, publisher)
+    )
+    task.add_done_callback(_consume_task_exception)
 
     return JSONResponse({"session_id": session_id, "round_id": round_id})
 
@@ -397,6 +438,7 @@ async def chat_websocket(websocket: WebSocket):
                     task = asyncio.create_task(
                         _execute_chat_round(window_graph, window_state, config, publisher)
                     )
+                    task.add_done_callback(_consume_task_exception)
 
                     # 将 Redis Pub/Sub 事件转发到 WebSocket（超时则重验令牌，过期或登出则中断）
                     auth_failed = False
@@ -418,9 +460,19 @@ async def chat_websocket(websocket: WebSocket):
                                 continue
                             if event.get("type") != "message":
                                 continue
-                            data = json.loads(event["data"])
+                            try:
+                                data = json.loads(event["data"])
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.warning(
+                                    "chat ws: invalid Redis payload session_id=%s round_id=%s: %s",
+                                    session_id,
+                                    round_id,
+                                    e,
+                                    exc_info=True,
+                                )
+                                continue
                             await send_ws(data)
-                            if data.get("event") in ("finished", "error"):
+                            if data.get("event") in _WS_ROUND_DONE_EVENTS:
                                 break
                     finally:
                         await pubsub.unsubscribe(channel)
@@ -470,11 +522,12 @@ async def chat_websocket(websocket: WebSocket):
                 # 如果 round 仍在运行，在后台订阅转发；若在此处阻塞 listen()，主循环无法 receive_text，后续 chat 永远进不来
                 if status == "running":
                     channel = publisher.channel_name(session_id, active_round)
-                    asyncio.create_task(
+                    relay_task = asyncio.create_task(
                         _relay_redis_pubsub_to_websocket(
                             websocket, publisher, channel, ws_send_lock, token, member_id
                         )
                     )
+                    relay_task.add_done_callback(_consume_task_exception)
 
             elif msg_type == "ping":
                 await send_ws({"event": "pong"})
@@ -482,12 +535,16 @@ async def chat_websocket(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
+        logger.exception("chat_websocket: 未处理异常")
         # 捕获未预期的异常，避免 1006
         try:
             async with ws_send_lock:
                 await websocket.send_json({"event": "error", "message": f"服务端内部错误: {e}"})
         except Exception:
-            pass
+            logger.debug(
+                "chat_websocket: failed to send error frame to client",
+                exc_info=True,
+            )
 
 
 async def _execute_chat_round(
@@ -556,6 +613,11 @@ async def _execute_chat_round(
 
     except Exception as e:
         round_failed = True
+        logger.exception(
+            "LangGraph 群聊轮次失败 session_id=%s round_id=%s",
+            session_id,
+            round_id,
+        )
         await publisher.publish(session_id, round_id, {
             "event": "error",
             "message": str(e),

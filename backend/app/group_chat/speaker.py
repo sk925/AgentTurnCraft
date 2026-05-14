@@ -3,6 +3,8 @@ import re
 import threading
 from typing import Any
 
+from app.database import transactional_session
+from app.model_manage.model_manage_service import ModelManageService
 from app.models.agent_log import AgentLogService
 from app.group_chat.chat_common import (
     ChatRecord,
@@ -11,8 +13,7 @@ from app.group_chat.chat_common import (
     RoleType,
     SpearkerRecord,
     UserProfile,
-    WindowState,
-    llm,
+    WindowState
 )
 from app.group_chat.event_publisher import EventPublisher
 from app.models import Agent
@@ -20,6 +21,7 @@ from app.tools.ask_user import ask_user_question
 from app.tools.parse_file import parse_file_by_id
 from langchain.agents.middleware import ModelRequest
 from langchain.agents.middleware.types import dynamic_prompt
+from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from deepagents.backends import LocalShellBackend
 
@@ -214,11 +216,22 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledS
     if compiled_graph is not None:
         return compiled_graph, current_agent_info['prompt']
 
+    with transactional_session() as session:
+        # 查询模型信息
+        model_info_service = ModelManageService(session)
+        model_info = model_info_service.get_chat_model_info_by_model_id(current_agent_info['chat_model_id'])
+        llm_model = ChatOpenAI(
+            model=model_info.model_name,
+            base_url=model_info.base_url,
+            api_key=model_info.api_key,
+            stream_usage=True
+        )
+
     with _speaker_agent_lock:
         # 双重检查，避免其他线程已创建
         compiled_graph = speaker_agent_map.get(cache_key)
         if compiled_graph is None:
-            compiled_graph = create_deep_agent(model=llm, 
+            compiled_graph = create_deep_agent(model=llm_model, 
                                            system_prompt="", 
                                            tools=[ask_user_question,parse_file_by_id],
                                            skills=[],

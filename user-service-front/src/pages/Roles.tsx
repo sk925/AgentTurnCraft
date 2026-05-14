@@ -5,6 +5,8 @@ import { createRole, deleteRole, fetchPermissions, fetchRoles, updateRole } from
 import type { PermissionDto, RoleDto } from '../types';
 import { PageHeader } from '../components/PageHeader';
 
+const BUILTIN_TYPE = 1;
+
 export default function RolesPage() {
   const [roles, setRoles] = useState<RoleDto[]>([]);
   const [perms, setPerms] = useState<PermissionDto[]>([]);
@@ -33,13 +35,12 @@ export default function RolesPage() {
   }, []);
 
   const permLabelById = useMemo(() => {
-    const m = new Map<number, string>();
-    perms.forEach((p) => m.set(p.id, `${p.code} · ${p.name}`));
+    const m = new Map<string, string>();
+    perms.forEach((p) => m.set(String(p.id), `${p.code} · ${p.name}`));
     return m;
   }, [perms]);
 
   const columns: ColumnsType<RoleDto> = [
-    { title: 'ID', dataIndex: 'id', width: 72 },
     {
       title: '名称',
       dataIndex: 'name',
@@ -53,11 +54,26 @@ export default function RolesPage() {
           <span style={{ fontWeight: 650 }}>{text}</span>
         ),
     },
+    {
+      title: '类型',
+      dataIndex: 'role_type',
+      width: 96,
+      render: (t: number) =>
+        t === BUILTIN_TYPE ? (
+          <Tag bordered={false} color="volcano">
+            内置
+          </Tag>
+        ) : (
+          <Tag bordered={false} color="cyan">
+            自定义
+          </Tag>
+        ),
+    },
     { title: '说明', dataIndex: 'description', render: (v) => v ?? '—' },
     {
       title: '权限',
       dataIndex: 'permission_ids',
-      render: (ids: number[]) =>
+      render: (ids: string[]) =>
         ids.length === 0 ? (
           <Typography.Text type="secondary">无</Typography.Text>
         ) : (
@@ -82,14 +98,19 @@ export default function RolesPage() {
       fixed: 'right' as const,
       render: (_, row) => (
         <Flex gap={4}>
-          <Button type="link" style={{ paddingInline: 4 }} onClick={() => openEdit(row)}>
+          <Button
+            type="link"
+            style={{ paddingInline: 4 }}
+            disabled={row.role_type === BUILTIN_TYPE}
+            onClick={() => openEdit(row)}
+          >
             编辑
           </Button>
           <Button
             type="link"
             danger
             style={{ paddingInline: 4 }}
-            disabled={row.name === 'admin'}
+            disabled={row.role_type === BUILTIN_TYPE}
             onClick={() => confirmDelete(row)}
           >
             删除

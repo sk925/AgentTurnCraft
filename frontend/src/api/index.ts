@@ -13,6 +13,15 @@ export const authApi = {
   logout: () => api.post<{ message: string }>('/auth/logout').then((res) => res.data),
 };
 
+/** 与后端 PermissionMineOut 一致 */
+export interface MyPermissionsOut {
+  codes: string[];
+}
+
+export const permissionsApi = {
+  getMine: () => api.get<MyPermissionsOut>('/permissions/me').then((res) => res.data.codes),
+};
+
 /** 解析后端 JSON：成功体为 { code, message, data }；错误体同样字段，优先读 message，兼容旧版 detail */
 export function extractBackendMessage(data: unknown): string | undefined {
   if (data == null || typeof data !== 'object') {
@@ -150,7 +159,19 @@ export interface Agent {
   /** 1 内置 2 自定义 */
   type?: number;
   create_time: string;
+  /** 默认对话模型（base_chat_model.id，字符串避免大整数精度丢失） */
+  chat_model_id?: string | null;
   skills?: Skill[];
+}
+
+/** 与后端 ChatModelResponse 对齐，用于智能体绑定模型下拉 */
+export interface ChatModelOption {
+  id: string;
+  name: string;
+  provider_id: string;
+  provider_name: string;
+  model_type: string;
+  description: string | null;
 }
 
 export interface Group {
@@ -344,11 +365,18 @@ export const skillsApi = {
   delete: (id: number) => api.delete(`/skills/${id}`),
 };
 
+export const modelManageApi = {
+  listChatModels: () =>
+    api
+      .get<ApiResponse<ChatModelOption[]>>('/model-manage/chat-models')
+      .then((res) => ensureArray<ChatModelOption>(res.data?.data)),
+};
+
 export const agentsApi = {
   getAll: () => api.get<ApiResponse<Agent[]>>('/agents').then((res) => ensureArray<Agent>(res.data?.data)),
-  create: (data: { name: string; description?: string; prompt?: string }) =>
+  create: (data: { name: string; description?: string; prompt?: string; chat_model_id?: string | null }) =>
     api.post<ApiResponse<Agent>>('/agents', data).then((res) => res.data.data),
-  update: (id: number, data: { name?: string; description?: string; prompt?: string }) =>
+  update: (id: number, data: { name?: string; description?: string; prompt?: string; chat_model_id?: string | null }) =>
     api.put<ApiResponse<Agent>>(`/agents/${id}`, data).then((res) => res.data.data),
   delete: (id: number) => api.delete(`/agents/${id}`),
   addSkill: (agentId: number, skillId: number) =>

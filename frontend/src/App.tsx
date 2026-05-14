@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Layout, Menu, Popconfirm, Typography, message } from 'antd';
+import { Avatar, Button, Layout, Menu, Popconfirm, Typography, message, type MenuProps } from 'antd';
 import {
   LogoutOutlined,
   MessageOutlined,
@@ -10,7 +10,7 @@ import {
   UserOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import LoginModal from './components/LoginModal';
 import { PortalSessionsProvider } from './PortalSessionsContext';
 import SkillsPage from './pages/Skills';
@@ -27,12 +27,22 @@ import {
   getUserServiceToken,
   isUserLoggedIn,
   OPEN_LOGIN_MODAL_EVENT,
+  permissionsApi,
   sessionsApi,
 } from './api';
-import type { ChatSession, SessionType } from './api';
+import type { ChatSession } from './api';
 import './App.css';
 
 const { Sider, Content } = Layout;
+
+/** 侧栏路由 key → PermissionMenu 成员名（与后端 permission.code 一致） */
+const MENU_PATH_TO_PERMISSION: Record<string, string> = {
+  '/skills': 'skill_management',
+  '/agents': 'agent_management',
+  '/groups': 'group_management',
+  '/chat': 'chat',
+  '/group-chat': 'group_chat',
+};
 
 function navSelectedKey(pathname: string): string {
   if (pathname.startsWith('/group-chat')) {
@@ -53,28 +63,55 @@ function sessionsMatchingChatMenu(sessionsList: ChatSession[], menuKey: '/chat' 
   });
 }
 
+/** 未登录不可进入门户（主页及各业务页），统一跳转登录页 */
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  if (!isUserLoggedIn()) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  return <>{children}</>;
+}
+
 function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionsReady, setSessionsReady] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
-  /** 登录成功后递增，触发会话列表与侧栏展示刷新 */
+  /** 登录成功后递增，触发会话列表、权限与侧栏展示刷新 */
   const [authTick, setAuthTick] = useState(0);
+  const [myPermissionCodes, setMyPermissionCodes] = useState<string[] | null>(null);
+  const [permissionsReady, setPermissionsReady] = useState(true);
 
-  const currentSessionType: SessionType = location.pathname.startsWith('/group-chat') ? 'group' : 'chat';
   const isChatRoute =
     location.pathname === '/' ||
     location.pathname.startsWith('/chat') ||
     location.pathname.startsWith('/group-chat');
 
-  const menuItems = [
-    { key: '/skills', icon: <ToolOutlined />, label: '技能' },
-    { key: '/agents', icon: <RobotOutlined />, label: '智能体' },
-    { key: '/groups', icon: <UsergroupAddOutlined />, label: '群组' },
-    { key: '/chat', icon: <MessageOutlined />, label: '对话' },
-    { key: '/group-chat', icon: <TeamOutlined />, label: '群聊' },
-  ];
+  const menuItems = useMemo((): MenuProps['items'] => {
+    const all: MenuProps['items'] = [
+      { key: '/skills', icon: <ToolOutlined />, label: '技能' },
+      { key: '/agents', icon: <RobotOutlined />, label: '智能体' },
+      { key: '/groups', icon: <UsergroupAddOutlined />, label: '群组' },
+      { key: '/chat', icon: <MessageOutlined />, label: '对话' },
+      { key: '/group-chat', icon: <TeamOutlined />, label: '群聊' },
+    ];
+    if (!isUserLoggedIn()) {
+      return [];
+    }
+    if (!permissionsReady || myPermissionCodes === null) {
+      return all;
+    }
+    const allowed = new Set(myPermissionCodes);
+    return all!.filter((item) => {
+      const key = item && 'key' in item ? String(item.key) : '';
+      const need = MENU_PATH_TO_PERMISSION[key];
+      if (!need) {
+        return true;
+      }
+      return allowed.has(need);
+    });
+  }, [myPermissionCodes, permissionsReady]);
 
   const handleMenuClick = async (key: string) => {
     if (key !== '/chat' && key !== '/group-chat') {
@@ -118,6 +155,37 @@ function AppLayout() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadMyPermissions = async () => {
+      if (!isUserLoggedIn()) {
+        setMyPermissionCodes(null);
+        setPermissionsReady(true);
+        return;
+      }
+      setPermissionsReady(false);
+      try {
+        const codes = await permissionsApi.getMine();
+        if (!cancelled) {
+          setMyPermissionCodes(codes);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          message.warning(getBackendErrorMessage(error, '获取权限失败，侧栏暂时显示全部菜单'));
+          setMyPermissionCodes(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setPermissionsReady(true);
+        }
+      }
+    };
+    void loadMyPermissions();
+    return () => {
+      cancelled = true;
+    };
+  }, [authTick]);
+
+  useEffect(() => {
     void loadSessions();
   }, [loadSessions, authTick]);
 
@@ -140,9 +208,7 @@ function AppLayout() {
     setSessions([]);
     setSessionsReady(true);
     setAuthTick((v) => v + 1);
-    if (isChatRoute) {
-      navigate(currentSessionType === 'group' ? '/group-chat' : '/chat', { replace: true });
-    }
+    navigate('/login', { replace: true });
     message.success('已退出登录');
   };
 
@@ -292,7 +358,14 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/*" element={<AppLayout />} />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth>
+              <AppLayout />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

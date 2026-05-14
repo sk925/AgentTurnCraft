@@ -99,8 +99,6 @@ def get_llm() -> ChatOpenAI:
         stream_usage=True
     )
 
-llm: ChatOpenAI = get_llm()
-
 
 class NoSpeakerError(Exception):
     """无可用发言人异常"""

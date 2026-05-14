@@ -18,8 +18,8 @@ import {
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, RobotOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { agentsApi, getBackendErrorMessage, goLoginPage, groupsApi, isUserLoggedIn, skillsApi } from '../api';
-import type { Agent, Skill, Group } from '../api';
+import { agentsApi, getBackendErrorMessage, goLoginPage, groupsApi, isUserLoggedIn, modelManageApi, skillsApi } from '../api';
+import type { Agent, ChatModelOption, Skill, Group } from '../api';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -35,6 +35,7 @@ export default function AgentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,10 +74,25 @@ export default function AgentsPage() {
     }
   };
 
+  const fetchChatModels = async () => {
+    if (!isUserLoggedIn()) {
+      return;
+    }
+    try {
+      const data = await modelManageApi.listChatModels();
+      setChatModels(data);
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '获取聊天模型列表失败'));
+    }
+  };
+
   useEffect(() => {
     void fetchAgents();
     void fetchGroups();
     void fetchSkills();
+    if (isUserLoggedIn()) {
+      void fetchChatModels();
+    }
   }, []);
 
   const agentIdsInFilterGroup = useMemo(() => {
@@ -106,16 +122,27 @@ export default function AgentsPage() {
     return false;
   };
 
-  const handleSubmit = async (values: { name: string; description?: string; prompt?: string }) => {
+  const handleSubmit = async (values: {
+    name: string;
+    description?: string;
+    prompt?: string;
+    chat_model_id?: string | null;
+  }) => {
     if (!requireLogin()) {
       return;
     }
+    const payload = {
+      name: values.name,
+      description: values.description,
+      prompt: values.prompt,
+      chat_model_id: values.chat_model_id ?? null,
+    };
     try {
       if (editingAgent) {
-        await agentsApi.update(editingAgent.id, values);
+        await agentsApi.update(editingAgent.id, payload);
         message.success('编辑成功');
       } else {
-        await agentsApi.create(values);
+        await agentsApi.create(payload);
         message.success('添加成功');
       }
       setModalVisible(false);
@@ -172,6 +199,7 @@ export default function AgentsPage() {
     }
     setEditingAgent(null);
     form.resetFields();
+    void fetchChatModels();
     setModalVisible(true);
   };
 
@@ -180,10 +208,12 @@ export default function AgentsPage() {
       return;
     }
     setEditingAgent(agent);
+    void fetchChatModels();
     form.setFieldsValue({
       name: agent.name,
       description: agent.description ?? undefined,
       prompt: agent.prompt ?? undefined,
+      chat_model_id: agent.chat_model_id ?? undefined,
     });
     setModalVisible(true);
   };
@@ -196,6 +226,23 @@ export default function AgentsPage() {
     () => groups.map((g) => ({ label: g.name, value: g.id })),
     [groups],
   );
+
+  const chatModelSelectOptions = useMemo(
+    () =>
+      chatModels.map((m) => ({
+        label: m.provider_name ? `${m.name}（${m.provider_name}）` : m.name,
+        value: m.id,
+      })),
+    [chatModels],
+  );
+
+  const chatModelLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of chatModels) {
+      map.set(m.id, m.provider_name ? `${m.name}（${m.provider_name}）` : m.name);
+    }
+    return map;
+  }, [chatModels]);
 
   return (
     <div>
@@ -260,6 +307,16 @@ export default function AgentsPage() {
                       <Text type="secondary" style={{ fontSize: 13 }}>
                         {excerpt(agent.description, 120)}
                       </Text>
+                      <div style={{ marginTop: 10 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          对话模型
+                        </Text>
+                        <Paragraph style={{ marginBottom: 0, marginTop: 4, fontSize: 13 }}>
+                          {agent.chat_model_id
+                            ? chatModelLabelById.get(agent.chat_model_id) ?? `ID ${agent.chat_model_id}`
+                            : '—'}
+                        </Paragraph>
+                      </div>
                       <div style={{ marginTop: 10 }}>
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           提示词摘要
@@ -345,6 +402,15 @@ export default function AgentsPage() {
           </Form.Item>
           <Form.Item name="prompt" label="提示词">
             <Input.TextArea rows={6} placeholder="系统提示词，定义语气、知识边界与行为" />
+          </Form.Item>
+          <Form.Item name="chat_model_id" label="对话模型">
+            <Select
+              allowClear
+              placeholder="选择默认对话模型（可选，须先在模型管理中配置）"
+              options={chatModelSelectOptions}
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
         </Form>
       </Modal>

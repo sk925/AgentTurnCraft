@@ -1,8 +1,10 @@
+from app.config import settings
 from app.group_chat.chat_common import MsgType, RoleType, WindowState, save_token_usage
 from app.tools.parse_file import parse_file_by_id
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
-from app.group_chat.chat_common import llm
+
 
 """
 超级助手：
@@ -51,7 +53,13 @@ SELECTOR_PROMPT = """
 ## 近期对话记录
 {recent_messages}
 """
-
+agent_selector_llm = ChatOpenAI(
+    model=settings.agent_selector_model_name,
+    base_url=settings.agent_selector_model_base_url,
+    api_key=settings.agent_selector_model_api_key,
+    temperature=0.2,
+    stream_usage=True
+)
 class GroupSelection(BaseModel):
     """选择员工：根据用户意图从候选池中挑选进入群组的智能体。"""
     selected_agent_ids: list[int]|None = Field(description="应拉入群聊员工列表，不需要时可不选，只能从候选列表中选，不能选重复的员工；用户明确指定人选时须包含其点名的在册成员。")
@@ -61,7 +69,7 @@ class GroupSelection(BaseModel):
 
 def select_agent(window_state: WindowState) -> GroupSelection:
     """根据用户意图筛选可用的智能体"""
-    structured = llm.with_structured_output(GroupSelection, include_raw=True)
+    structured = agent_selector_llm.with_structured_output(GroupSelection, include_raw=True)
 
     # 可用成员列表
     agent_members_text = ""

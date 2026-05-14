@@ -1,9 +1,47 @@
-.chat-scroll-panel {
+/* 视口锁定根：高度由 JS 按 visualViewport 计算，子树再用 flex 分配 */
+.chat-viewport-root {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.chat-viewport-root > .chat-idle-shell,
+.chat-viewport-root > .chat-session-root {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* 对话卡片内：消息区可滚动，输入框固定在卡片底部
+ * 使用 Grid + minmax(0,1fr) 约束首行最小高度，避免长历史消息在嵌套 flex 下把滚动区撑开、
+ * 将输入框顶出卡片并被 ant-card-body 的 overflow 裁切 */
+.chat-dialog-body {
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.chat-dialog-body .chat-scroll-panel {
+  grid-row: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 12px;
   padding-right: 4px;
-  min-height: 0;
+}
+
+.chat-dialog-body .chat-composer {
+  grid-row: 2;
+  align-self: stretch;
 }
 
 /* 已选会话：三列随主内容区撑满视口，避免底部大块留白 */
@@ -24,12 +62,43 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  height: 100%;
+  max-height: 100%;
 }
 
+/* 会话区卡片：占满列高，body 吃掉标题下剩余空间，再交给 chat-dialog-body / chat-scroll-panel */
 .chat-session-root .chat-session-row .portal-card.ant-card {
   flex: 1;
   min-height: 0;
-  height: auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chat-session-root .portal-card.ant-card .ant-card-head {
+  flex-shrink: 0;
+}
+
+/* 侧栏：成员 / 工作空间列表过长时在卡片内滚动 */
+.chat-session-root .chat-side-panel-card.ant-card .ant-card-body {
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 中间对话：body 占满卡片除标题外剩余高度（height:0 + flex 避免按内容撑开把输入框裁到视外） */
+.chat-session-root .chat-main-dialog-card.ant-card .ant-card-body {
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 未选会话：输入框在主区垂直居中 */
@@ -303,6 +372,13 @@ label.chat-composer__icon-btn--plus {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+}
+
+/* 气泡上的 max-width:85% 若相对 stack 会形成「百分比相对 shrink-wrap 父级」的循环，
+   浏览器会把宽度压到极小；由 stack 相对整行限宽，气泡相对 stack 用 fit-content */
+.chat-user-message-stack .chat-bubble {
+  max-width: 100%;
+  width: fit-content;
 }
 
 .chat-user-attachment-stack {

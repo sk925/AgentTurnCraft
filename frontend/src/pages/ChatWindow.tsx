@@ -228,7 +228,57 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const scrollPanelRef = useRef<HTMLDivElement>(null);
+  /** 用视口像素高度约束整块聊天区，避免 Ant Layout/Row/Card 链上 min-height:auto 撑开导致内部无法滚动 */
+  const chatViewportRootRef = useRef<HTMLDivElement>(null);
   const attachmentInputId = `chat-attachment-${useId().replace(/:/g, '')}`;
+
+  const syncChatViewportHeight = useCallback(() => {
+    const el = chatViewportRootRef.current;
+    if (!el) {
+      return;
+    }
+    const vv = window.visualViewport;
+    const vh = vv?.height ?? window.innerHeight;
+    const top = el.getBoundingClientRect().top;
+    const bottomGap = 10;
+    const h = Math.max(200, Math.floor(vh - top - bottomGap));
+    el.style.height = `${h}px`;
+    el.style.maxHeight = `${h}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = chatViewportRootRef.current;
+    if (!el) {
+      return;
+    }
+    const run = () => {
+      syncChatViewportHeight();
+    };
+    run();
+    let innerRaf = 0;
+    const outerRaf = requestAnimationFrame(() => {
+      innerRaf = requestAnimationFrame(run);
+    });
+    window.addEventListener('resize', run);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', run);
+    vv?.addEventListener('scroll', run);
+    const ro = new ResizeObserver(run);
+    const pc = el.closest('.portal-content--chat');
+    if (pc) {
+      ro.observe(pc);
+    }
+    return () => {
+      cancelAnimationFrame(outerRaf);
+      cancelAnimationFrame(innerRaf);
+      window.removeEventListener('resize', run);
+      vv?.removeEventListener('resize', run);
+      vv?.removeEventListener('scroll', run);
+      ro.disconnect();
+      el.style.height = '';
+      el.style.maxHeight = '';
+    };
+  }, [syncChatViewportHeight, hasSelectedSession, isGroupChat, location.pathname, messages.length]);
 
   const scrollChatToBottom = useCallback(() => {
     const el = scrollPanelRef.current;
@@ -831,152 +881,157 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     </div>
   );
 
-  if (!hasSelectedSession) {
-    return (
-      <div className="chat-idle-shell">
-        <div className="chat-idle-shell__composer">{renderComposer()}</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="chat-session-root">
-    <Row className="chat-session-row" gutter={[16, 16]} style={{ flex: 1, minHeight: 0, width: '100%' }}>
-      {isGroupChat && hasSelectedSession && (
-        <Col xs={24} lg={5}>
-          <Card
-            className="portal-card"
-            variant="borderless"
-            title={
-              <Space>
-                <TeamOutlined />
-                群聊成员
-              </Space>
-            }
-            extra={
-              <Select
-                allowClear
-                placeholder="选择群组"
-                style={{ minWidth: 140, maxWidth: 200 }}
-                value={selectedGroupId}
-                onChange={(v) => setSelectedGroupId(v ?? undefined)}
-                options={groups.map((g) => ({ label: g.name, value: g.id }))}
-              />
-            }
-            style={{ height: '100%' }}
+    <div ref={chatViewportRootRef} className="chat-viewport-root">
+      {!hasSelectedSession ? (
+        <div className="chat-idle-shell">
+          <div className="chat-idle-shell__composer">{renderComposer()}</div>
+        </div>
+      ) : (
+        <div className="chat-session-root">
+          <Row
+            className="chat-session-row"
+            gutter={[16, 16]}
+            align="stretch"
+            style={{ flex: 1, minHeight: 0, width: '100%' }}
           >
-            {visibleGroupMembers.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={membersEmptyDescription} />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {visibleGroupMembers.map((item) => (
-                  <div key={item.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-                    <Space align="start">
-                      <Badge dot={currentSpeakerId === item.id} color="green">
-                        <Avatar icon={<UserOutlined />} />
-                      </Badge>
-                      <div>
-                        <Space>
-                          <span>{item.name}</span>
-                          <Tag color={currentSpeakerId === item.id ? 'green' : 'default'}>
-                            {currentSpeakerId === item.id ? '发言中' : `ID: ${item.id}`}
-                          </Tag>
-                        </Space>
-                        <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                          {currentSpeakerId === item.id ? '正在回复你的问题' : '待发言'}
-                        </div>
-                      </div>
+            {isGroupChat && hasSelectedSession && (
+              <Col xs={24} lg={5}>
+                <Card
+                  className="portal-card chat-side-panel-card"
+                  variant="borderless"
+                  title={
+                    <Space>
+                      <TeamOutlined />
+                      群聊成员
                     </Space>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </Col>
-      )}
-
-      <Col xs={24} lg={isGroupChat ? 13 : 18}>
-        <Card
-          className="portal-card"
-          variant="borderless"
-          title={isGroupChat ? '群聊对话' : '对话'}
-          style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
-        >
-          {chatMessages.length === 0 ? (
-            <div className="chat-empty-session">
-              <div className="chat-empty-session__inner">
-                <Empty className="chat-empty-session__hint" image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
-                {renderComposer()}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div ref={scrollPanelRef} className="chat-scroll-panel">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {chatMessages.map((item) => (
-                    <div key={item.id} className={`chat-row ${item.role === 'user' ? 'chat-row-self' : 'chat-row-speaker'}`}>
-                      {item.role === 'user' ? (
-                        <div className="chat-user-message-stack">
-                          {(item.attachments?.length ?? 0) > 0 && (
-                            <div className="chat-user-attachment-stack">
-                              {item.attachments!.map((a) => (
-                                <UserAttachmentCard
-                                  key={a.id}
-                                  fileName={a.file_name}
-                                  mime={a.file_type}
-                                  typeLabel={a.type_label}
-                                  previewUrl={a.preview_url}
-                                />
-                              ))}
+                  }
+                  extra={
+                    <Select
+                      allowClear
+                      placeholder="选择群组"
+                      style={{ minWidth: 140, maxWidth: 200 }}
+                      value={selectedGroupId}
+                      onChange={(v) => setSelectedGroupId(v ?? undefined)}
+                      options={groups.map((g) => ({ label: g.name, value: g.id }))}
+                    />
+                  }
+                  style={{ height: '100%' }}
+                >
+                  {visibleGroupMembers.length === 0 ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={membersEmptyDescription} />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {visibleGroupMembers.map((item) => (
+                        <div key={item.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                          <Space align="start">
+                            <Badge dot={currentSpeakerId === item.id} color="green">
+                              <Avatar icon={<UserOutlined />} />
+                            </Badge>
+                            <div>
+                              <Space>
+                                <span>{item.name}</span>
+                                <Tag color={currentSpeakerId === item.id ? 'green' : 'default'}>
+                                  {currentSpeakerId === item.id ? '发言中' : `ID: ${item.id}`}
+                                </Tag>
+                              </Space>
+                              <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                                {currentSpeakerId === item.id ? '正在回复你的问题' : '待发言'}
+                              </div>
                             </div>
-                          )}
-                          {item.content ? (
-                            <div className="chat-bubble chat-bubble-self chat-bubble-self--neutral">
-                              <Typography.Text strong>我</Typography.Text>
-                              <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                            </div>
-                          ) : null}
+                          </Space>
                         </div>
-                      ) : (
-                        <div className="chat-bubble chat-bubble-speaker">
-                          <Typography.Text strong>{item.title}</Typography.Text>
-                          <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                        </div>
-                      )}
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  )}
+                </Card>
+              </Col>
+            )}
 
-              {renderComposer()}
-            </>
-          )}
-        </Card>
-      </Col>
-
-      {hasSelectedSession && (
-      <Col xs={24} lg={6}>
-        <Card className="portal-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
-          {workspaceFiles.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {workspaceFiles.map((item) => (
-                <div key={`${item.round_id}-${item.relative_path}`} style={{ paddingBottom: 10, borderBottom: '1px solid #f0f0f0' }}>
-                  <Typography.Text strong>{item.name}</Typography.Text>
-                  <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {item.relative_path}
-                    </Typography.Text>
+            <Col xs={24} lg={isGroupChat ? 13 : 18}>
+              <Card
+                className="portal-card chat-main-dialog-card"
+                variant="borderless"
+                title={isGroupChat ? '群聊对话' : '对话'}
+                style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
+              >
+                {chatMessages.length === 0 ? (
+                  <div className="chat-empty-session">
+                    <div className="chat-empty-session__inner">
+                      <Empty className="chat-empty-session__hint" image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
+                      {renderComposer()}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </Col>
+                ) : (
+                  <div className="chat-dialog-body">
+                    <div ref={scrollPanelRef} className="chat-scroll-panel">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {chatMessages.map((item) => (
+                          <div key={item.id} className={`chat-row ${item.role === 'user' ? 'chat-row-self' : 'chat-row-speaker'}`}>
+                            {item.role === 'user' ? (
+                              <div className="chat-user-message-stack">
+                                {(item.attachments?.length ?? 0) > 0 && (
+                                  <div className="chat-user-attachment-stack">
+                                    {item.attachments!.map((a) => (
+                                      <UserAttachmentCard
+                                        key={a.id}
+                                        fileName={a.file_name}
+                                        mime={a.file_type}
+                                        typeLabel={a.type_label}
+                                        previewUrl={a.preview_url}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                                {item.content ? (
+                                  <div className="chat-bubble chat-bubble-self chat-bubble-self--neutral">
+                                    <Typography.Text strong>我</Typography.Text>
+                                    <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="chat-bubble chat-bubble-speaker">
+                                <Typography.Text strong>{item.title}</Typography.Text>
+                                <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {renderComposer()}
+                  </div>
+                )}
+              </Card>
+            </Col>
+
+            {hasSelectedSession && (
+              <Col xs={24} lg={6}>
+                <Card className="portal-card chat-side-panel-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
+                  {workspaceFiles.length === 0 ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {workspaceFiles.map((item) => (
+                        <div key={`${item.round_id}-${item.relative_path}`} style={{ paddingBottom: 10, borderBottom: '1px solid #f0f0f0' }}>
+                          <Typography.Text strong>{item.name}</Typography.Text>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {item.relative_path}
+                            </Typography.Text>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </Col>
+            )}
+          </Row>
+        </div>
       )}
-    </Row>
     </div>
   );
 }

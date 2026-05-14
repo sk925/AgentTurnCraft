@@ -1,5 +1,7 @@
-from app.group_chat.chat_common import RoleType, WindowState, llm, save_token_usage
+from app.config import settings
+from app.group_chat.chat_common import RoleType, WindowState, save_token_usage
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 
@@ -43,7 +45,13 @@ SYSTEM_PROMPT = """
 {user_message}
 """
 
-
+speaker_selector_llm = ChatOpenAI(
+    model=settings.speaker_model_name,
+    base_url=settings.speaker_model_base_url,
+    api_key=settings.speaker_model_api_key,
+    temperature=0.2,
+    stream_usage=True
+)
 class SpeakerSelection(BaseModel):
     """总控：结合用户意图与当前发言记录，决定下一位发言人或结束"""
 
@@ -95,7 +103,7 @@ def select_speaker(window_state: WindowState,current_turn:int) -> SpeakerSelecti
         previous_speaker_text = ""
 
     # 调用模型筛选
-    structured = llm.with_structured_output(SpeakerSelection, include_raw=True)
+    structured = speaker_selector_llm.with_structured_output(SpeakerSelection, include_raw=True)
     current_system_prompt = SYSTEM_PROMPT.format(agent_members=group_members_text, session_summary='', transcript=transcript_text, turn=current_turn, previous_speaker=previous_speaker_text, user_message=window_state.get("user_message", ""))
     messages = [
         SystemMessage(content=current_system_prompt),

@@ -4,6 +4,7 @@ import { Layout, Menu, Avatar, Typography, Dropdown, Flex, Tooltip } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AuditOutlined,
+  CloudOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -44,7 +45,8 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   }, [logout, navigate]);
 
   const normalizePath = location.pathname.startsWith('/') ? location.pathname.slice(1) : location.pathname;
-  const selectedKeys = ['/'.concat(normalizePath || 'users')];
+  const pathForKey = normalizePath.startsWith('model-manage') ? 'model-manage' : normalizePath || 'users';
+  const selectedKeys = [`/${pathForKey}`];
 
   return (
     <Layout className="admin-root" style={{ minHeight: '100%' }}>
@@ -88,6 +90,12 @@ export function AdminLayout({ children }: AdminLayoutProps) {
               icon: <AuditOutlined />,
               label: '权限',
               onClick: () => void navigate('/permissions'),
+            },
+            {
+              key: '/model-manage',
+              icon: <CloudOutlined />,
+              label: '模型管理',
+              onClick: () => void navigate('/model-manage'),
             },
           ]}
         />

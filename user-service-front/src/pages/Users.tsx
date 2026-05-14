@@ -44,13 +44,12 @@ export default function UsersPage() {
   }, []);
 
   const roleNameById = useMemo(() => {
-    const m = new Map<number, string>();
-    roles.forEach((r) => m.set(r.id, r.name));
+    const m = new Map<string, string>();
+    roles.forEach((r) => m.set(String(r.id), r.name));
     return m;
   }, [roles]);
 
   const columns: ColumnsType<UserDto> = [
-    { title: 'ID', dataIndex: 'id', width: 72 },
     {
       title: '用户名',
       dataIndex: 'username',
@@ -66,7 +65,7 @@ export default function UsersPage() {
     {
       title: '角色',
       dataIndex: 'role_ids',
-      render: (ids: number[]) =>
+      render: (ids: string[]) =>
         ids.length === 0 ? (
           <Typography.Text type="secondary">未分配</Typography.Text>
         ) : (

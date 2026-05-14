@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "free-chat"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    
+    agent_selector_model_name: str
+    agent_selector_model_base_url: str
+    agent_selector_model_api_key: str
+
+    speaker_model_name: str
+    speaker_model_base_url: str
+    speaker_model_api_key: str
+    
 
 
 settings = Settings()

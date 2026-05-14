@@ -5,15 +5,7 @@ import { createPermission, deletePermission, fetchPermissions, updatePermission 
 import type { PermissionDto } from '../types';
 import { PageHeader } from '../components/PageHeader';
 
-const SEEDED_CODES = new Set([
-  'user:read',
-  'user:write',
-  'user:delete',
-  'role:read',
-  'role:write',
-  'permission:read',
-  'permission:write',
-]);
+const BUILTIN_TYPE = 1;
 
 export default function PermissionsPage() {
   const [rows, setRows] = useState<PermissionDto[]>([]);
@@ -41,16 +33,30 @@ export default function PermissionsPage() {
   }, []);
 
   const columns: ColumnsType<PermissionDto> = [
-    { title: 'ID', dataIndex: 'id', width: 72 },
     {
       title: '编码',
       dataIndex: 'code',
       width: 200,
-      render: (text: string) => (
-        <Tag bordered={false} color={SEEDED_CODES.has(text) ? 'default' : 'blue'} className="svc-tag-mono">
+      render: (text: string, row: PermissionDto) => (
+        <Tag bordered={false} color={row.permission_type === BUILTIN_TYPE ? 'default' : 'blue'} className="svc-tag-mono">
           {text}
         </Tag>
       ),
+    },
+    {
+      title: '类型',
+      dataIndex: 'permission_type',
+      width: 96,
+      render: (t: number) =>
+        t === BUILTIN_TYPE ? (
+          <Tag bordered={false} color="volcano">
+            内置
+          </Tag>
+        ) : (
+          <Tag bordered={false} color="cyan">
+            自定义
+          </Tag>
+        ),
     },
     { title: '名称', dataIndex: 'name', width: 140 },
     { title: '说明', dataIndex: 'description', render: (v) => v ?? '—' },
@@ -61,14 +67,19 @@ export default function PermissionsPage() {
       fixed: 'right' as const,
       render: (_, row) => (
         <Flex gap={4}>
-          <Button type="link" style={{ paddingInline: 4 }} onClick={() => openEdit(row)}>
+          <Button
+            type="link"
+            style={{ paddingInline: 4 }}
+            disabled={row.permission_type === BUILTIN_TYPE}
+            onClick={() => openEdit(row)}
+          >
             编辑
           </Button>
           <Button
             type="link"
             danger
             style={{ paddingInline: 4 }}
-            disabled={SEEDED_CODES.has(row.code)}
+            disabled={row.permission_type === BUILTIN_TYPE}
             onClick={() => confirmDelete(row)}
           >
             删除

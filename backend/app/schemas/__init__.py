@@ -39,6 +39,20 @@ class SkillResponse(SkillBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _optional_chat_model_id(v: Any) -> int | None:
+    """接受 JSON 数字或字符串（大整数），写入 ORM 前转为 int。"""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        raise ValueError("无效的模型 ID")
+    if isinstance(v, int):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    return int(s)
+
+
 class AgentBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -46,19 +60,38 @@ class AgentBase(BaseModel):
 
 
 class AgentCreate(AgentBase):
-    pass
+    chat_model_id: int | None = None
+
+    @field_validator("chat_model_id", mode="before")
+    @classmethod
+    def _chat_model_id_create(cls, v: Any) -> int | None:
+        return _optional_chat_model_id(v)
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     prompt: Optional[str] = None
+    chat_model_id: int | None = None
+
+    @field_validator("chat_model_id", mode="before")
+    @classmethod
+    def _chat_model_id_update(cls, v: Any) -> int | None:
+        return _optional_chat_model_id(v)
 
 
 class AgentResponse(AgentBase):
     id: int
     type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
     create_time: datetime
+    chat_model_id: str | None = None
+
+    @field_validator("chat_model_id", mode="before")
+    @classmethod
+    def _chat_model_id_resp(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        return str(v)
 
     model_config = ConfigDict(from_attributes=True)
 

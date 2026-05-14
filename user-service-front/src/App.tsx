@@ -5,6 +5,8 @@ import LoginPage from './pages/Login';
 import UsersPage from './pages/Users';
 import RolesPage from './pages/Roles';
 import PermissionsPage from './pages/Permissions';
+import ModelManageProvidersPage from './pages/ModelManageProvidersPage';
+import ModelProviderModelsPage from './pages/ModelProviderModelsPage';
 import { AdminLayout } from './layouts/AdminLayout';
 import { useAuthToken } from './hooks/useAuthToken';
 
@@ -47,6 +49,8 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="roles" element={<RolesPage />} />
         <Route path="permissions" element={<PermissionsPage />} />
+        <Route path="model-manage" element={<ModelManageProvidersPage />} />
+        <Route path="model-manage/providers/:providerId" element={<ModelProviderModelsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/users" replace />} />
     </Routes>

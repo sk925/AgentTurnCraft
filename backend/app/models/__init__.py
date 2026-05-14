@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Table
+from sqlalchemy import BigInteger, Column, Integer, String, Text, DateTime, ForeignKey, Table
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
@@ -41,6 +41,7 @@ class Agent(Base):
     prompt = Column(Text)
     resource_type = Column('type', Integer, nullable=False, server_default='2')
     create_time = Column(DateTime, server_default=func.now())
+    chat_model_id = Column(BigInteger, nullable=True)
 
     skills = relationship('Skill', secondary=skill_agent, back_populates='agents')
 
