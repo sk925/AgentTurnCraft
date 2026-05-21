@@ -32,7 +32,12 @@ class Settings(BaseSettings):
     speaker_model_name: str
     speaker_model_base_url: str
     speaker_model_api_key: str
-    
+
+    default_single_agent_id: int
+
+    # 日志：development=可读文本；production=JSON 行输出到 stdout
+    app_env: str = "development"
+    log_level: str = "INFO"
 
 
 settings = Settings()

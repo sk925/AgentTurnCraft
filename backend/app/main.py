@@ -1,13 +1,19 @@
 from contextlib import asynccontextmanager
 from typing import Any
 
-from app.exceptions import register_exception_handler
-from app.group_chat import chat_window
 from app.config import settings
+from app.logging_setup import configure_logging
+
+# 尽早配置，保证后续 import 的 app.* 模块 logger.info 可见
+configure_logging()
+
+from app.exceptions import register_exception_handler
+from app.chat.chat_router import router as chat_router
+from app.chat.group.chat_graph import set_checkpointer
 from app.redis_client import init_redis, close_redis
-from app.schemas import ApiResponse, api_error_dict, success_response
-from app.session import router as session_router
-from app.workspace import workspace_files
+from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
+from app.chat.session import router as session_router
+from app.chat.workspace import workspace_files
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +28,8 @@ from app.manage.routers import roles as manage_roles
 from app.manage.routers import users as manage_users
 from app.manage.seed import seed_if_empty
 from app.manage.login_session import delete_expired_user_login_rows
-from app.group_chat.chat_graph import set_checkpointer
-from app.routers import agents, groups, skills
-from app.routers.upload_file_router import upload_file_router
+from app.chat.base.routers import agents, groups, skills
+from app.chat.base.routers.upload_file_router import upload_file_router
 from app.model_manage.model_manage_router import model_manage_router
 
 
@@ -73,7 +78,7 @@ app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(groups.router, prefix="/api", tags=["groups"])
 app.include_router(upload_file_router, prefix="/api")
-app.include_router(chat_window.router, prefix="/api", tags=["chat_window"])
+app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files"])
 app.include_router(session_router, prefix="/api", tags=["sessions"])
 app.include_router(manage_auth.router, prefix="/api/auth", tags=["auth"])
@@ -95,4 +100,10 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.app_env.lower() != "production",
+    )

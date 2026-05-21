@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser
 from app.constants import RESOURCE_TYPE_BUILTIN
-from app.models import Agent, Group, Skill
+from app.chat.base.models import Agent, Group, Skill
 
 
 def list_skills(session: Session, user: CurrentUser | None) -> list[Skill]:

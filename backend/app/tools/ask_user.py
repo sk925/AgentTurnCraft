@@ -47,6 +47,9 @@ def ask_user_question(
     result = "用户放弃,停止任务"
     while True:
         user_input = interrupt(payload)
+        print("======ask_user_question==============")
+        print(user_input)
+        print("======ask_user_question==============")
         if user_input.get("cancel"):
             break
         else:

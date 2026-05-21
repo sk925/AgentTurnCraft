@@ -248,9 +248,9 @@ def init_db():
     from app.manage import models as _manage_models  # noqa: F401
     from app.manage.models import user_login as _manage_user_login  # noqa: F401
     from app.model_manage import model_cat as _model_cat  # noqa: F401
-    from app.models import agent_log as _agent_log  # noqa: F401
-    from app.models import upload_file as _upload_file  # noqa: F401
-    import app.session.models as _session_models  # noqa: F401
+    from app.chat.base.models import agent_log as _agent_log  # noqa: F401
+    from app.chat.base.models import upload_file as _upload_file  # noqa: F401
+    import app.chat.session.models as _session_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_resource_type_columns()

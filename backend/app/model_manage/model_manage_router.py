@@ -11,7 +11,7 @@ from app.model_manage.scheme import (
     ModelProviderResponse,
     ModelProviderUpdateRequest,
 )
-from app.schemas import ApiResponse, success_response
+from app.chat.base.schemas import ApiResponse, success_response
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 

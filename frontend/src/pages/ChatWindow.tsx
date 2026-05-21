@@ -2,10 +2,14 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import {
   Avatar,
   Badge,
+  Button,
   Card,
+  Checkbox,
   Col,
   Empty,
+  Form,
   Input,
+  Radio,
   Row,
   Select,
   Space,
@@ -23,12 +27,15 @@ import {
   FilePptOutlined,
   FileTextOutlined,
   FileWordOutlined,
+  CloseOutlined,
   LoadingOutlined,
   PlusOutlined,
+  RobotOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import {
+  agentsApi,
   chatPathForSessionType,
   chatWebSocket,
   chatWindowApi,
@@ -41,7 +48,16 @@ import {
   sessionsApi,
   uploadFileApi,
 } from '../api';
-import type { ChatWindowEvent, Group, SessionMessage, SessionType, WSServerMessage, WorkspaceArtifactFile } from '../api';
+import type {
+  Agent,
+  ChatWindowEvent,
+  Group,
+  SessionMessage,
+  SessionType,
+  SpeakerInterruptArgs,
+  WSServerMessage,
+  WorkspaceArtifactFile,
+} from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePortalSessions } from '../PortalSessionsContext';
 import './ChatWindow.css';
@@ -127,7 +143,8 @@ function UserAttachmentCard({
   const rootClass = [
     'chat-attachment-card',
     previewUrl && !uploading ? 'chat-attachment-card--clickable' : '',
-    compact ? 'chat-attachment-card--compact' : '',
+    compact ? 'chat-attachment-card--compact chat-attachment-card--composer' : '',
+    uploading ? 'chat-attachment-card--uploading' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -172,7 +189,7 @@ function UserAttachmentCard({
           }}
           aria-label="移除附件"
         >
-          ×
+          <CloseOutlined />
         </button>
       )}
     </div>
@@ -200,6 +217,78 @@ type PendingAttachment = {
   preview_url?: string | null;
 };
 
+type ActiveInterruptForm = SpeakerInterruptArgs & { tool_id?: string };
+
+type SpeakerInterruptFormCardProps = {
+  args: SpeakerInterruptArgs;
+  submitting: boolean;
+  onSubmit: (values: Record<string, string | string[]>) => void;
+  onCancel: () => void;
+};
+
+function SpeakerInterruptFormCard({ args, submitting, onSubmit, onCancel }: SpeakerInterruptFormCardProps) {
+  const [form] = Form.useForm<Record<string, string | string[]>>();
+
+  return (
+    <div className="chat-interrupt-card">
+      <div className="chat-interrupt-card__head">
+        <Typography.Text strong className="chat-interrupt-card__title">
+          需要您补充信息
+        </Typography.Text>
+        {args.reason ? (
+          <Typography.Paragraph type="secondary" className="chat-interrupt-card__reason">
+            {args.reason}
+          </Typography.Paragraph>
+        ) : null}
+      </div>
+      <Form
+        form={form}
+        layout="vertical"
+        className="chat-interrupt-card__form"
+        onFinish={(values) => onSubmit(values)}
+      >
+        {args.questions.map((q) => {
+          const fieldType = (q.field_type || 'input').toLowerCase();
+          const choices = (q.choices ?? []).filter(Boolean);
+          return (
+            <Form.Item
+              key={q.field_key}
+              name={q.field_key}
+              label={
+                <span>
+                  <span className="chat-interrupt-card__field-label">{q.field_label || q.field_key}</span>
+                  {q.question ? (
+                    <Typography.Text type="secondary" className="chat-interrupt-card__field-hint">
+                      {q.question}
+                    </Typography.Text>
+                  ) : null}
+                </span>
+              }
+              rules={[{ required: true, message: `请填写${q.field_label || q.field_key}` }]}
+            >
+              {fieldType === 'radio' && choices.length > 0 ? (
+                <Radio.Group options={choices.map((c) => ({ label: c, value: c }))} />
+              ) : fieldType === 'checkbox' && choices.length > 0 ? (
+                <Checkbox.Group options={choices.map((c) => ({ label: c, value: c }))} />
+              ) : (
+                <Input placeholder={q.placeholder ?? undefined} allowClear />
+              )}
+            </Form.Item>
+          );
+        })}
+        <div className="chat-interrupt-card__actions">
+          <Button type="primary" htmlType="submit" loading={submitting}>
+            提交并继续
+          </Button>
+          <Button htmlType="button" disabled={submitting} onClick={onCancel}>
+            取消
+          </Button>
+        </div>
+      </Form>
+    </div>
+  );
+}
+
 type ChatWindowPageProps = {
   sessionType?: SessionType;
 };
@@ -216,21 +305,37 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   const [orgId] = useState<number>(1);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /** 当前对话轮次（来自 start / catchup_round） */
+  const [roundId, setRoundId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   /** 当前轮次后端「建群」结果（SSE create_group） */
   const [roundGroupMembers, setRoundGroupMembers] = useState<Array<{ id: number; name: string }>>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(undefined);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentsReady, setAgentsReady] = useState(false);
+  /** 单聊指定智能体；undefined 表示使用服务端默认智能体 */
+  const [selectedAgentId, setSelectedAgentId] = useState<number | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceArtifactFile[]>([]);
   const [currentSpeaker, setCurrentSpeaker] = useState<{ id: number; name: string } | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  /** speaker_interrupt：待用户填写的表单 */
+  const [activeInterruptForm, setActiveInterruptForm] = useState<ActiveInterruptForm | null>(null);
   const scrollPanelRef = useRef<HTMLDivElement>(null);
   /** 用视口像素高度约束整块聊天区，避免 Ant Layout/Row/Card 链上 min-height:auto 撑开导致内部无法滚动 */
   const chatViewportRootRef = useRef<HTMLDivElement>(null);
   const attachmentInputId = `chat-attachment-${useId().replace(/:/g, '')}`;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const roundIdRef = useRef(roundId);
+  roundIdRef.current = roundId;
+  /** 展示 interrupt 表单时对应的 round_id（提交 resume 须沿用该轮次） */
+  const interruptRoundIdRef = useRef<string | null>(null);
+  /** 当前连接上正在进行的 chat 轮次；避免 start 改 URL 后误触发 catchup / 重载历史 */
+  const liveChatRoundRef = useRef(false);
 
   const syncChatViewportHeight = useCallback(() => {
     const el = chatViewportRootRef.current;
@@ -344,6 +449,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     setSessionId(null);
     setRoundGroupMembers([]);
     setSelectedGroupId(undefined);
+    setSelectedAgentId(undefined);
     setCurrentSpeaker(null);
     setMessages([]);
     setWorkspaceFiles([]);
@@ -362,6 +468,29 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         message.error(getBackendErrorMessage(error, '加载群组列表失败'));
       });
   }, [isGroupChat, hasSelectedSession]);
+
+  useEffect(() => {
+    if (isGroupChat || !isUserLoggedIn()) {
+      setAgents([]);
+      setAgentsReady(true);
+      return;
+    }
+    setAgentsReady(false);
+    void agentsApi
+      .getAll()
+      .then((list) => setAgents(list))
+      .catch((error: unknown) => {
+        message.error(getBackendErrorMessage(error, '加载智能体列表失败'));
+        setAgents([]);
+      })
+      .finally(() => setAgentsReady(true));
+  }, [isGroupChat]);
+
+  const chatAgentOptions = useMemo(() => {
+    return agents
+      .filter((a) => a.chat_model_id != null && String(a.chat_model_id).trim() !== '')
+      .map((a) => ({ label: a.name, value: a.id }));
+  }, [agents]);
 
   const toChatMessage = (record: SessionMessage, index: number): ChatMessage => {
     if (record.role_type === 'user') {
@@ -416,7 +545,13 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const handleSSEEvent = (event: ChatWindowEvent) => {
     switch (event.event) {
       case 'start':
+        sessionIdRef.current = event.session_id;
+        roundIdRef.current = event.round_id;
+        interruptRoundIdRef.current = null;
+        liveChatRoundRef.current = true;
         setSessionId(event.session_id);
+        setRoundId(event.round_id);
+        chatWebSocket.setSessionId(event.session_id);
         void refreshWorkspaceFiles(event.session_id);
         if (searchParams.get('session_id') !== event.session_id) {
           navigate(
@@ -520,7 +655,20 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           ];
         });
         break;
+      case 'speaker_interrupt':
+        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+        interruptRoundIdRef.current = roundIdRef.current;
+        setActiveInterruptForm({
+          reason: event.args?.reason ?? '',
+          questions: Array.isArray(event.args?.questions) ? event.args.questions : [],
+          tool_id: event.tool_id,
+        });
+        setSubmitting(false);
+        break;
       case 'speaker_finished':
+        liveChatRoundRef.current = false;
+        setActiveInterruptForm(null);
+        interruptRoundIdRef.current = null;
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
@@ -529,6 +677,10 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         void refreshWorkspaceFiles();
         break;
       case 'finished':
+        liveChatRoundRef.current = false;
+        setActiveInterruptForm(null);
+        interruptRoundIdRef.current = null;
+        setRoundId(null);
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
@@ -554,6 +706,10 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       return;
     }
     if (event.event === 'catchup_round') {
+      if (event.round_id) {
+        roundIdRef.current = event.round_id;
+        setRoundId(event.round_id);
+      }
       // 断线重放：逐一处理缓冲事件
       if (event.events && event.events.length > 0) {
         event.events.forEach((e) => handleSSEEvent(e));
@@ -563,6 +719,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     if (event.event === 'error') {
       console.error('[ChatWindow] 服务端错误:', event.message);
       message.error(event.message || '服务端错误');
+      liveChatRoundRef.current = false;
+      setActiveInterruptForm(null);
+      interruptRoundIdRef.current = null;
       setSubmitting(false);
       return;
     }
@@ -591,19 +750,102 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     }
     // 须先于 connect 注册：首包 auth 失败时服务端立即下发 auth_error 并关连接，否则 onmessage 时 callbacks 仍为空
     const unsub = chatWebSocket.onEvent((event) => handleEventRef.current(event));
-    chatWebSocket.connect(sessionId);
+    chatWebSocket.ensureConnected();
 
     return () => {
       unsub();
       chatWebSocket.disconnect();
     };
-  }, [isGroupChat, loggedIn, sessionId]);
+  }, [isGroupChat, loggedIn]);
+
+  const submitInterruptForm = (values: Record<string, string | string[]>) => {
+    const sid = sessionIdRef.current ?? sessionId;
+    const rid = interruptRoundIdRef.current ?? roundIdRef.current ?? roundId;
+    if (!sid) {
+      message.warning('会话尚未就绪，请稍后再试');
+      return;
+    }
+    if (!rid) {
+      message.warning('缺少对话轮次信息，请刷新页面后重试');
+      return;
+    }
+    if (!isUserLoggedIn()) {
+      message.warning('请先登录');
+      return;
+    }
+    setSubmitting(true);
+    setActiveInterruptForm(null);
+    interruptRoundIdRef.current = null;
+    liveChatRoundRef.current = true;
+    const sent = chatWebSocket.sendInterruptResume({
+      org_id: orgId,
+      session_id: sid,
+      round_id: rid,
+      session_type: sessionType,
+      group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+      resume: { data: values },
+    });
+    if (!sent) {
+      setSubmitting(false);
+      liveChatRoundRef.current = false;
+    }
+  };
+
+  const cancelInterruptForm = () => {
+    const sid = sessionIdRef.current ?? sessionId;
+    const rid = interruptRoundIdRef.current ?? roundIdRef.current ?? roundId;
+    if (!sid) {
+      setActiveInterruptForm(null);
+      return;
+    }
+    if (!rid) {
+      setActiveInterruptForm(null);
+      message.warning('缺少对话轮次信息，请刷新页面后重试');
+      return;
+    }
+    setSubmitting(true);
+    setActiveInterruptForm(null);
+    interruptRoundIdRef.current = null;
+    liveChatRoundRef.current = true;
+    const sent = chatWebSocket.sendInterruptResume({
+      org_id: orgId,
+      session_id: sid,
+      round_id: rid,
+      session_type: sessionType,
+      group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+      resume: { cancel: true },
+    });
+    if (!sent) {
+      setSubmitting(false);
+      liveChatRoundRef.current = false;
+    }
+  };
+
+  const renderInterruptForm = () => {
+    if (!activeInterruptForm || activeInterruptForm.questions.length === 0) {
+      return null;
+    }
+    return (
+      <div className="chat-row chat-row-interrupt">
+        <SpeakerInterruptFormCard
+          args={activeInterruptForm}
+          submitting={submitting}
+          onSubmit={submitInterruptForm}
+          onCancel={cancelInterruptForm}
+        />
+      </div>
+    );
+  };
 
   const sendMessage = () => {
     const text = input.trim();
     const fileIds = pendingAttachments.filter((a) => !a.uploading).map((a) => a.id);
     if (pendingAttachments.some((a) => a.uploading)) {
       message.warning('请等待附件上传完成后再发送');
+      return;
+    }
+    if (activeInterruptForm) {
+      message.info('请先完成上方表单或点击取消');
       return;
     }
     if ((!text && fileIds.length === 0) || submitting) {
@@ -636,6 +878,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
     setInput('');
     setSubmitting(true);
+    liveChatRoundRef.current = true;
 
     const sent = chatWebSocket.sendChat({
       user_message: text,
@@ -643,9 +886,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       session_id: sessionId,
       session_type: sessionType,
       group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+      single_agent_id:
+        !isGroupChat && selectedAgentId != null ? String(selectedAgentId) : undefined,
       file_ids: fileIds.length > 0 ? fileIds : undefined,
     });
     if (!sent) {
+      liveChatRoundRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -712,9 +958,6 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     }
   };
 
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
-
   useEffect(() => {
     const selectedSessionId = searchParams.get('session_id');
     const pathHere = location.pathname.startsWith('/group-chat') ? '/group-chat' : '/chat';
@@ -722,6 +965,8 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     if (!selectedSessionId) {
       // 未指定 session_id：视为”新建”，需要保证窗口干净
       setSessionId(null);
+      setRoundId(null);
+      interruptRoundIdRef.current = null;
       setCurrentSpeaker(null);
       setMessages([]);
       setWorkspaceFiles([]);
@@ -730,11 +975,21 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setRoundGroupMembers([]);
       }
       chatWebSocket.setSessionId(null);
+      liveChatRoundRef.current = false;
+      setActiveInterruptForm(null);
+      chatWebSocket.ensureConnected();
       return;
     }
 
     if (!portalSessionsReady) {
       return;
+    }
+
+    if (liveChatRoundRef.current) {
+      if (selectedSessionId === sessionIdRef.current) {
+        chatWebSocket.setSessionId(selectedSessionId);
+        return;
+      }
     }
 
     if (selectedSessionId === sessionIdRef.current) {
@@ -804,6 +1059,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       />
       {pendingAttachments.length > 0 && (
         <div className="chat-composer__attachments">
+          <div className="chat-composer__attachments-head">
+            <span className="chat-composer__attachments-label">
+              已添加 {pendingAttachments.length} 个附件
+            </span>
+          </div>
           <div className="chat-composer__attachments-inner">
             {pendingAttachments.map((f) => (
               <UserAttachmentCard
@@ -840,36 +1100,55 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         }
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleComposerKeyDown}
-        disabled={submitting || !isUserLoggedIn()}
+        disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
         autoSize={{ minRows: 2, maxRows: 12 }}
         variant="borderless"
       />
       <div className="chat-composer__toolbar chat-composer__toolbar--minimal">
-        <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
-          <span className="chat-composer__tooltip-anchor">
-            {!isUserLoggedIn() || submitting ? (
-              <span
-                className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
-                aria-disabled
-              >
-                <PlusOutlined />
-              </span>
-            ) : (
-              <label
-                htmlFor={attachmentInputId}
-                className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
-              >
-                {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
-              </label>
-            )}
-          </span>
-        </Tooltip>
+        <div className="chat-composer__toolbar-left">
+          <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
+            <span className="chat-composer__tooltip-anchor">
+              {!isUserLoggedIn() || submitting || activeInterruptForm ? (
+                <span
+                  className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
+                  aria-disabled
+                >
+                  <PlusOutlined />
+                </span>
+              ) : (
+                <label
+                  htmlFor={attachmentInputId}
+                  className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
+                >
+                  {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
+                </label>
+              )}
+            </span>
+          </Tooltip>
+          {!isGroupChat && (
+            <Select
+              className="chat-composer__agent-select"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={agentsReady ? '默认智能体' : '加载智能体…'}
+              loading={!agentsReady}
+              disabled={!isUserLoggedIn() || submitting || Boolean(activeInterruptForm) || chatAgentOptions.length === 0}
+              value={selectedAgentId}
+              onChange={(v) => setSelectedAgentId(v ?? undefined)}
+              options={chatAgentOptions}
+              popupMatchSelectWidth={false}
+              suffixIcon={<RobotOutlined className="chat-composer__agent-select-icon" />}
+              notFoundContent={agentsReady ? '暂无已绑定模型的智能体' : null}
+            />
+          )}
+        </div>
         <Tooltip title="发送（Enter）">
           <span className="chat-composer__tooltip-anchor">
             <button
               type="button"
               className={`chat-composer__send${submitting ? ' chat-composer__send--loading' : ''}`}
-              disabled={submitting || !isUserLoggedIn()}
+              disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
               onClick={() => void sendMessage()}
               aria-label="发送"
             >
@@ -885,6 +1164,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     <div ref={chatViewportRootRef} className="chat-viewport-root">
       {!hasSelectedSession ? (
         <div className="chat-idle-shell">
+          {activeInterruptForm ? (
+            <div className="chat-idle-shell__interrupt">{renderInterruptForm()}</div>
+          ) : null}
           <div className="chat-idle-shell__composer">{renderComposer()}</div>
         </div>
       ) : (
@@ -955,12 +1237,19 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                 title={isGroupChat ? '群聊对话' : '对话'}
                 style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
               >
-                {chatMessages.length === 0 ? (
+                {chatMessages.length === 0 && !activeInterruptForm ? (
                   <div className="chat-empty-session">
                     <div className="chat-empty-session__inner">
                       <Empty className="chat-empty-session__hint" image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyChatDescription} />
                       {renderComposer()}
                     </div>
+                  </div>
+                ) : chatMessages.length === 0 && activeInterruptForm ? (
+                  <div className="chat-dialog-body">
+                    <div ref={scrollPanelRef} className="chat-scroll-panel">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{renderInterruptForm()}</div>
+                    </div>
+                    {renderComposer()}
                   </div>
                 ) : (
                   <div className="chat-dialog-body">
@@ -998,6 +1287,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                             )}
                           </div>
                         ))}
+                        {renderInterruptForm()}
                       </div>
                     </div>
 

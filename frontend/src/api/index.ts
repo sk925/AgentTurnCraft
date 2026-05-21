@@ -311,6 +311,27 @@ export interface ChatSpeakerModelStreamEvent {
   inner_node?: string;
 }
 
+/** ask_user_question 表单字段（与后端 UserInputField 对齐） */
+export interface SpeakerInterruptQuestionField {
+  question: string;
+  field_key: string;
+  field_label: string;
+  field_type: string;
+  placeholder?: string | null;
+  choices?: string[] | null;
+}
+
+export interface SpeakerInterruptArgs {
+  reason: string;
+  questions: SpeakerInterruptQuestionField[];
+}
+
+export interface ChatSpeakerInterruptEvent {
+  event: 'speaker_interrupt';
+  args: SpeakerInterruptArgs;
+  tool_id?: string;
+}
+
 export type ChatWindowEvent =
   | ChatStartEvent
   | ChatFinishedEvent
@@ -319,7 +340,8 @@ export type ChatWindowEvent =
   | ChatSelectSpeakerEvent
   | ChatSpeakerEvent
   | ChatSpeakerStreamEvent
-  | ChatSpeakerModelStreamEvent;
+  | ChatSpeakerModelStreamEvent
+  | ChatSpeakerInterruptEvent;
 
 function parseSSEChunk(chunk: string): ChatWindowEvent[] {
   const events: ChatWindowEvent[] = [];
@@ -342,7 +364,7 @@ function parseSSEChunk(chunk: string): ChatWindowEvent[] {
       const parsed = JSON.parse(payload) as ChatWindowEvent;
       events.push(parsed);
     } catch (error) {
-      console.error('解析 chat_window SSE 失败', error, payload);
+      console.error('解析 chat SSE 失败', error, payload);
     }
   });
 
@@ -405,7 +427,7 @@ export const chatWindowApi = {
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
-    const response = await fetch('http://localhost:8000/api/chat_window/chat', {
+    const response = await fetch('http://localhost:8000/api/chat', {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
@@ -453,7 +475,7 @@ export const chatWindowApi = {
   },
   getWorkspaceFiles: async (sessionId: string) => {
     return api
-      .get<ApiResponse<WorkspaceArtifactFile[]>>('/chat_window/workspace_files', {
+      .get<ApiResponse<WorkspaceArtifactFile[]>>('/chat/workspace_files', {
         params: { session_id: sessionId },
       })
       .then((res) => ensureArray<WorkspaceArtifactFile>(res.data?.data));
@@ -486,6 +508,8 @@ export const sessionsApi = {
     api
       .get<ApiResponse<SessionMessage[]>>(`/sessions/${sessionId}/messages`)
       .then((res) => ensureArray<SessionMessage>(res.data?.data)),
+  delete: (sessionId: string) =>
+    api.delete<ApiResponse<{ deleted: boolean; session_id: string }>>(`/sessions/${sessionId}`),
 };
 
 /** WebSocket 消息协议（连接建立后须先发送 type: auth） */
@@ -496,9 +520,14 @@ export type WSClientMessage =
       user_message: string;
       org_id: number;
       session_id?: string | null;
+      /** 表单 resume 等续跑场景须传上一轮 round_id，与后端 Redis 频道一致 */
+      round_id?: string | null;
       session_type?: SessionType;
       group_id?: number | null;
+      /** 单聊时指定智能体 id（字符串，与后端 WindowChatRequest 一致）；省略则使用服务端默认智能体 */
+      single_agent_id?: string | null;
       file_ids?: string[] | null;
+      resume?: { data?: Record<string, string | string[]>; cancel?: boolean };
     }
   | { type: 'catchup'; session_id: string }
   | { type: 'ping' };
@@ -514,7 +543,7 @@ export type WSServerMessage =
 
 type WSEventCallback = (event: WSServerMessage) => void;
 
-const WS_BASE_URL = 'ws://localhost:8000/api/chat_window/ws';
+const WS_BASE_URL = 'ws://localhost:8000/api/chat/ws';
 const PING_INTERVAL = 30000; // 30s
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1s
@@ -528,21 +557,46 @@ export class ChatWebSocket {
   private sessionId: string | null = null;
   private intentionalClose = false;
   private pendingMessages: WSClientMessage[] = [];
+  /** 非预期断线重连后，在 authenticated 时补发 catchup */
+  private catchupOnNextAuth = false;
   /** 服务端已对首包 auth 返回 authenticated 之前，业务消息先入队 */
   private wsAuthenticated = false;
   /** 本轮连接是否已通过 onmessage 提示过 auth_error（避免与 onclose 4001 重复弹窗） */
   private authErrorNotified = false;
 
-  /** 是否已连接 */
+  /** 是否已连接且已完成 auth */
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ws?.readyState === WebSocket.OPEN && this.wsAuthenticated;
   }
 
-  /** 建立 WebSocket 连接，可传入已有 session_id */
-  connect(sessionId?: string | null) {
-    this.sessionId = sessionId ?? null;
+  /** 无有效连接时建立连接（新建会话发消息、进入聊天页时调用） */
+  ensureConnected(): void {
+    if (this.isConnected()) {
+      return;
+    }
+    if (this.ws?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+    this.connect();
+  }
+
+  /**
+   * 建立 WebSocket 连接。已连接且已认证时默认不重复建连。
+   * forceReconnect：非预期断线后的重连，认证成功后会 catchup。
+   */
+  connect(options?: { forceReconnect?: boolean }) {
+    const force = options?.forceReconnect ?? false;
+    if (!force && this.isConnected()) {
+      return;
+    }
+    if (!force && this.ws?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
     this.intentionalClose = false;
-    this.pendingMessages = [];
+    if (force) {
+      this.pendingMessages = [];
+    }
 
     // 关闭已有连接
     if (this.ws) {
@@ -560,14 +614,21 @@ export class ChatWebSocket {
 
     this.wsAuthenticated = false;
     this.authErrorNotified = false;
-    this.ws = new WebSocket(WS_BASE_URL);
+    const socket = new WebSocket(WS_BASE_URL);
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket) {
+        return;
+      }
       console.log('[ChatWebSocket] 已连接，发送认证');
-      this.ws!.send(JSON.stringify({ type: 'auth', token }));
+      socket.send(JSON.stringify({ type: 'auth', token }));
     };
 
-    this.ws.onmessage = (event: MessageEvent<string>) => {
+    socket.onmessage = (event: MessageEvent<string>) => {
+      if (this.ws !== socket) {
+        return;
+      }
       try {
         const data = JSON.parse(event.data) as WSServerMessage;
         if ('event' in data && data.event === 'authenticated') {
@@ -585,8 +646,12 @@ export class ChatWebSocket {
       }
     };
 
-    this.ws.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (this.ws !== socket) {
+        return;
+      }
       console.log(`[ChatWebSocket] 连接关闭: code=${event.code} reason=${event.reason}`);
+      this.ws = null;
       this.wsAuthenticated = false;
       this._stopPing();
       if (!this.intentionalClose) {
@@ -594,7 +659,10 @@ export class ChatWebSocket {
       }
     };
 
-    this.ws.onerror = (_event) => {
+    socket.onerror = (_event) => {
+      if (this.ws !== socket) {
+        return;
+      }
       console.error('[ChatWebSocket] 连接错误');
     };
   }
@@ -611,8 +679,10 @@ export class ChatWebSocket {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      this.ws.close();
+      const socket = this.ws;
       this.ws = null;
+      socket.onclose = null;
+      socket.close();
     }
   }
 
@@ -621,11 +691,15 @@ export class ChatWebSocket {
     user_message: string;
     org_id: number;
     session_id?: string | null;
+    round_id?: string | null;
     session_type?: SessionType;
     group_id?: number | null;
+    single_agent_id?: string | null;
     file_ids?: string[] | null;
+    resume?: { data?: Record<string, string | string[]>; cancel?: boolean };
   }): boolean {
-    if (!this.isConnected()) {
+    this.ensureConnected();
+    if (!this.ws) {
       this._notifyError('连接未就绪，消息发送失败');
       return false;
     }
@@ -633,9 +707,30 @@ export class ChatWebSocket {
     return true;
   }
 
+  /** 提交 speaker_interrupt 表单，恢复 LangGraph 执行 */
+  sendInterruptResume(params: {
+    org_id: number;
+    session_id: string;
+    round_id: string;
+    session_type?: SessionType;
+    group_id?: number | null;
+    resume: { data?: Record<string, string | string[]>; cancel?: boolean };
+  }): boolean {
+    return this.sendChat({
+      user_message: '',
+      org_id: params.org_id,
+      session_id: params.session_id,
+      round_id: params.round_id,
+      session_type: params.session_type,
+      group_id: params.group_id,
+      resume: params.resume,
+    });
+  }
+
   /** 请求断线重放 */
   sendCatchup(sessionId: string) {
     this.sessionId = sessionId;
+    this.ensureConnected();
     this._send({ type: 'catchup', session_id: sessionId });
   }
 
@@ -656,12 +751,12 @@ export class ChatWebSocket {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    const hadCatchup = this.pendingMessages.some((m) => m.type === 'catchup');
     while (this.pendingMessages.length > 0) {
       const msg = this.pendingMessages.shift()!;
       this.ws.send(JSON.stringify(msg));
     }
-    if (!hadCatchup && this.sessionId) {
+    if (this.catchupOnNextAuth && this.sessionId) {
+      this.catchupOnNextAuth = false;
       this.ws.send(JSON.stringify({ type: 'catchup', session_id: this.sessionId }));
     }
   }
@@ -720,7 +815,8 @@ export class ChatWebSocket {
     this.reconnectAttempts += 1;
     console.log(`[ChatWebSocket] ${delay}ms 后尝试第 ${this.reconnectAttempts} 次重连`);
     this.reconnectTimer = setTimeout(() => {
-      this.connect(this.sessionId);
+      this.catchupOnNextAuth = Boolean(this.sessionId);
+      this.connect({ forceReconnect: true });
     }, delay);
   }
 }

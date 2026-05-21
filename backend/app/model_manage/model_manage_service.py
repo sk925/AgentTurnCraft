@@ -9,7 +9,7 @@ from app.model_manage.scheme import (
     ModelProviderResponse,
     ModelProviderUpdateRequest,
 )
-from app.models import Agent
+from app.chat.base.models import Agent
 from fastapi import status
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,26 @@ class ModelManageService:
             description=row.description,
         )
 
+    def _agent_ids_bound_to_chat_models(self, chat_model_ids: list[int]) -> list[int]:
+        """当前仍绑定到给定聊天模型 id 的智能体 id（用于按 agent 淘汰发言人图缓存）。"""
+        if not chat_model_ids:
+            return []
+        rows = (
+            self.db.query(Agent.id)
+            .filter(Agent.chat_model_id.in_(chat_model_ids))
+            .distinct()
+            .all()
+        )
+        return [int(r[0]) for r in rows]
+
+    def _evict_speaker_graph_cache_for_chat_models(self, chat_model_ids: list[int]) -> None:
+        agent_ids = self._agent_ids_bound_to_chat_models(chat_model_ids)
+        if not agent_ids:
+            return
+        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
+
+        evict_speaker_agent_graph_cache_for_agent_ids(agent_ids)
+
     def create_model_provider(self, model_provider: ModelProviderCreateRequest) -> ModelProviderResponse:
         row = ModelProvider(
             name=model_provider.name,
@@ -66,6 +86,8 @@ class ModelManageService:
             row.api_key = model_provider.api_key
         self.db.commit()
         self.db.refresh(row)
+        chat_ids = [cm.id for cm in self.db.query(ChatModel).filter(ChatModel.provider_id == pid).all()]
+        self._evict_speaker_graph_cache_for_chat_models(chat_ids)
         return self._provider_resp(row)
 
     def get_model_provider_by_id(self, provider_id: int) -> ModelProviderResponse:
@@ -130,6 +152,7 @@ class ModelManageService:
             row.description = chat_model.description
         self.db.commit()
         self.db.refresh(row)
+        self._evict_speaker_graph_cache_for_chat_models([mid])
         return self._chat_resp(row)
 
     def get_chat_model_by_id(self, chat_model_id: int) -> ChatModelResponse:

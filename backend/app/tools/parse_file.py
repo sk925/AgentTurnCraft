@@ -5,13 +5,25 @@ import json
 from io import BytesIO, StringIO
 from pathlib import Path
 
+from langchain_core.callbacks import CallbackManagerForToolRun
 from minio.error import S3Error
 
 from app.config import settings
 from app.enums import FileType
-from app.models.upload_file import UploadFileService
+from app.chat.base.models.upload_file import UploadFileService
 from app.utils.minio_storage import download_bytes
-from langchain.tools import tool
+from langchain.tools import BaseTool, tool
+
+
+class FileParser(BaseTool):
+    name: str = "parse_file"
+    description: str = "解析文件内容"
+
+    def _run(self, file_id: int,run_manager: CallbackManagerForToolRun | None = None) -> str:
+        """解析文件内容"""
+        return parse_file_by_id(file_id)
+
+      
 
 _MAX_CHARS = 100_000
 
@@ -219,7 +231,7 @@ def _parse_by_type(kind: FileType, data: bytes) -> str:
     raise ValueError(f"未实现的类型: {kind}")
 
 
-@tool("parse_file_by_id", description="根据文件ID解析文件内容")
+#@tool("parse_file_by_id", description="根据文件ID解析文件内容")
 def parse_file_by_id(file_id: int) -> str:
     """根据文件ID解析文件内容"""
     upload_file = UploadFileService.get_upload_file_by_id(file_id)
