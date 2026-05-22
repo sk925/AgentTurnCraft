@@ -285,9 +285,7 @@ async def chat_websocket(websocket: WebSocket):
                         single_agent_id=message.get("single_agent_id"),
                         resume=message.get("resume"),
                     )
-                    print("======window_chat_request==============")
-                    print(window_chat_request)
-                    print("======window_chat_request==============")
+                    
                     try:
                         window_state, window_graph, config = build_window_state_for_session_type(
                             window_chat_request, db, checkpointer
@@ -351,10 +349,6 @@ async def chat_websocket(websocket: WebSocket):
                             await send_ws(data)
                             if data.get("event") in _WS_ROUND_DONE_EVENTS:
                                 terminal_event = data.get("event")
-                                print("====================")
-                                print("terminal_event")
-                                print(terminal_event)
-                                print("====================")
                                 break
                     finally:
                         await pubsub.unsubscribe(channel)

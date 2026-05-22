@@ -3,6 +3,7 @@ import threading
 from typing import Any, TypedDict
 
 from app.chat.base.models import Agent, AgentService
+from app.chat.deepseek_chat_openai import DeepSeekChatOpenAI
 from app.chat.group.event_publisher import EventPublisher
 from app.chat.group.speaker import artifact_dir, stream_messages, stream_updates
 from app.config import settings
@@ -16,7 +17,6 @@ from deepagents.backends import LocalShellBackend
 from fastapi import status
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from app.config import _BACKEND_ROOT
 from app.chat.group.chat_graph import get_checkpointer
@@ -83,11 +83,10 @@ class SingleChatContext(TypedDict, total=False):
     user_id: int
     user_custom_prompt: str
 
-
 def make_project_backend(_runtime: Any) -> LocalShellBackend:
     return LocalShellBackend(
         root_dir=_BACKEND_ROOT,
-        virtual_mode=False,
+        virtual_mode=True,
         inherit_env=True,
     )
 
@@ -158,7 +157,7 @@ async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: Even
                     model_info = model_info_service.get_chat_model_info_by_model_id(
                         int(agent_info['chat_model_id'])
                     )
-                llm_model = ChatOpenAI(
+                llm_model = DeepSeekChatOpenAI(
                     model=model_info.model_name,
                     base_url=model_info.base_url,
                     api_key=model_info.api_key,

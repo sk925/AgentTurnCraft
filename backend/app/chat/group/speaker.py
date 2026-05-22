@@ -4,6 +4,7 @@ import threading
 from collections import OrderedDict
 from typing import Any, Iterable
 
+from app.chat.deepseek_chat_openai import DeepSeekChatOpenAI
 from app.database import transactional_session
 from app.model_manage.model_manage_service import ModelManageService
 from app.chat.base.models.agent_log import AgentLogService
@@ -23,7 +24,6 @@ from app.tools.ask_user import ask_user_question
 from app.tools.parse_file import FileParser, parse_file_by_id
 from langchain.agents.middleware import ModelRequest
 from langchain.agents.middleware.types import dynamic_prompt
-from langchain_openai import ChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchRun
 from langgraph.graph.state import CompiledStateGraph
 from deepagents.backends import LocalShellBackend
@@ -257,7 +257,7 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledS
         # 查询模型信息
         model_info_service = ModelManageService(session)
         model_info = model_info_service.get_chat_model_info_by_model_id(current_agent_info['chat_model_id'])
-        llm_model = ChatOpenAI(
+        llm_model = DeepSeekChatOpenAI(
             model=model_info.model_name,
             base_url=model_info.base_url,
             api_key=model_info.api_key,
@@ -389,7 +389,8 @@ async def stream_updates(
                 RoleType.SPEAKER.value,
                 ai_msg,
             )
-    elif "tool" in data:
+    elif "tools" in data:
+        print(f"[DEBUG tools] payload: {data}")
         tool_msg_list = data["tools"]["messages"]
         for tool_msg in tool_msg_list:
             if tool_msg.name == "write_todos":

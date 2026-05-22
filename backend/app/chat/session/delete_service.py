@@ -1,7 +1,9 @@
-"""删除会话：agent_log、chat_session、LangGraph checkpoint 与 Redis 轮次缓存。"""
+"""删除会话：agent_log、chat_session、LangGraph checkpoint、Redis 轮次缓存与会话工作空间。"""
 
 from __future__ import annotations
 
+import logging
+import shutil
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -11,6 +13,9 @@ from app.chat.base.models.agent_log import AgentLog
 from app.chat.group.event_publisher import EventPublisher
 from app.chat.session.models import ChatSession
 from app.chat.session.service import get_session
+from app.config import _BACKEND_ROOT
+
+logger = logging.getLogger(__name__)
 
 
 def _collect_checkpoint_thread_ids(db: Session, session_id: str) -> list[str]:
@@ -51,6 +56,33 @@ def delete_session_records(db: Session, session_id: str, member_id: int) -> tupl
     db.delete(session)
     db.commit()
     return thread_ids, round_ids
+
+
+def purge_session_workspace(member_id: int, session_id: str) -> None:
+    """删除宿主机会话工作空间目录，并释放该会话的 Docker 沙箱容器（若存在）。"""
+    workspace_dir = (_BACKEND_ROOT / "workspace" / str(member_id) / str(session_id)).resolve()
+    artifact_root = _BACKEND_ROOT / "workspace"
+    try:
+        workspace_dir.relative_to(artifact_root.resolve())
+    except ValueError:
+        logger.error("拒绝删除非法工作空间路径: %s", workspace_dir)
+        return
+
+    if workspace_dir.is_dir():
+        shutil.rmtree(workspace_dir)
+        logger.info("已删除会话工作空间: %s", workspace_dir)
+
+    try:
+        from app.sandbox import get_sandbox_manager
+
+        get_sandbox_manager().release_session(member_id, session_id)
+    except Exception:
+        logger.warning(
+            "释放会话沙箱容器失败 session_id=%s member_id=%s",
+            session_id,
+            member_id,
+            exc_info=True,
+        )
 
 
 async def purge_session_runtime_state(

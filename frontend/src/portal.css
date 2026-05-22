@@ -177,20 +177,35 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 6px 4px;
-  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.portal-sider-sessions__list:hover,
+.portal-sider-sessions__list:focus-within {
+  scrollbar-color: rgba(15, 23, 42, 0.22) transparent;
 }
 
 .portal-sider-sessions__list::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
+}
+
+.portal-sider-sessions__list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .portal-sider-sessions__list::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.14);
+  background: transparent;
   border-radius: 999px;
 }
 
-.portal-sider-sessions__list::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 23, 42, 0.22);
+.portal-sider-sessions__list:hover::-webkit-scrollbar-thumb,
+.portal-sider-sessions__list:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.portal-sider-sessions__list:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.28);
 }
 
 .portal-sider-sessions__empty {
@@ -407,7 +422,7 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 12px 16px 16px 12px;
+  padding: 0 0 16px 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

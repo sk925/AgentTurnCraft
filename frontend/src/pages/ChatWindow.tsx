@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react';
 import {
   Avatar,
   Badge,
@@ -60,6 +71,7 @@ import type {
 } from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePortalSessions } from '../PortalSessionsContext';
+import { ChatAiMessage, ChatThinkingIndicator, ChatUserMessage } from '../components/chat/ChatMessageView';
 import './ChatWindow.css';
 
 const { TextArea } = Input;
@@ -324,6 +336,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   /** speaker_interrupt：待用户填写的表单 */
   const [activeInterruptForm, setActiveInterruptForm] = useState<ActiveInterruptForm | null>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
   const scrollPanelRef = useRef<HTMLDivElement>(null);
   /** 用视口像素高度约束整块聊天区，避免 Ant Layout/Row/Card 链上 min-height:auto 撑开导致内部无法滚动 */
   const chatViewportRootRef = useRef<HTMLDivElement>(null);
@@ -406,6 +419,14 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   }, [currentSpeaker]);
 
   const chatMessages = useMemo(() => messages.filter((item) => item.role !== 'system'), [messages]);
+
+  const showThinking = useMemo(() => {
+    if (!submitting) {
+      return false;
+    }
+    const streaming = chatMessages.find((m) => m.streaming);
+    return !streaming || !streaming.content.trim();
+  }, [submitting, chatMessages]);
 
   const visibleGroupMembers = useMemo(() => {
     if (!isGroupChat) {
@@ -1045,120 +1066,150 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     })();
   }, [searchParams, memberId, navigate, portalSessions, portalSessionsReady, location.pathname]);
 
-  const renderComposer = () => (
-    <div className="chat-composer">
-      <input
-        id={attachmentInputId}
-        type="file"
-        multiple
-        className="chat-file-input-sr"
-        tabIndex={-1}
-        disabled={uploadingAttachment || submitting || !isUserLoggedIn()}
-        aria-label="选择要上传的附件"
-        onChange={(e) => void onAttachmentFilesSelected(e)}
-      />
-      {pendingAttachments.length > 0 && (
-        <div className="chat-composer__attachments">
-          <div className="chat-composer__attachments-head">
-            <span className="chat-composer__attachments-label">
-              已添加 {pendingAttachments.length} 个附件
-            </span>
-          </div>
-          <div className="chat-composer__attachments-inner">
-            {pendingAttachments.map((f) => (
-              <UserAttachmentCard
-                key={f.id}
-                fileName={f.name}
-                mime={f.file_type || 'application/octet-stream'}
-                typeLabel={
-                  f.uploading ? '上传中' : f.type_label || friendlyFileTypeLabel(f.file_type || '', f.name)
-                }
-                uploading={f.uploading}
-                previewUrl={f.preview_url}
-                compact
-                onRemove={
-                  !f.uploading
-                    ? () => setPendingAttachments((prev) => prev.filter((x) => x.id !== f.id))
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        </div>
-      )}
-      <TextArea
-        className="chat-composer__textarea"
-        value={input}
-        placeholder={
-          !isUserLoggedIn()
-            ? '请先登录后再发送消息'
-            : hasSelectedSession
-              ? '发消息或输入「/」选择技能（Shift+Enter 换行）'
-              : isGroupChat
-                ? '发送消息开始群聊（Shift+Enter 换行）'
-                : '发送消息开始对话（Shift+Enter 换行）'
-        }
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleComposerKeyDown}
-        disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
-        autoSize={{ minRows: 2, maxRows: 12 }}
-        variant="borderless"
-      />
-      <div className="chat-composer__toolbar chat-composer__toolbar--minimal">
-        <div className="chat-composer__toolbar-left">
-          <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
-            <span className="chat-composer__tooltip-anchor">
-              {!isUserLoggedIn() || submitting || activeInterruptForm ? (
-                <span
-                  className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
-                  aria-disabled
-                >
-                  <PlusOutlined />
+  const handleComposerPodBlur = (e: FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) {
+      return;
+    }
+    setComposerFocused(false);
+  };
+
+  const renderComposer = () => {
+    const showComposerDock = pendingAttachments.length > 0;
+
+    return (
+      <div className="chat-composer-pod" tabIndex={-1} onBlur={handleComposerPodBlur}>
+        <input
+          id={attachmentInputId}
+          type="file"
+          multiple
+          className="chat-file-input-sr"
+          tabIndex={-1}
+          disabled={uploadingAttachment || submitting || !isUserLoggedIn()}
+          aria-label="选择要上传的附件"
+          onChange={(e) => void onAttachmentFilesSelected(e)}
+        />
+        <div className={`chat-composer__dock${showComposerDock ? ' chat-composer__dock--visible' : ''}`}>
+          {pendingAttachments.length > 0 && (
+            <div className="chat-composer__attachments">
+              <div className="chat-composer__attachments-head">
+                <span className="chat-composer__attachments-label">
+                  已添加 {pendingAttachments.length} 个附件
                 </span>
-              ) : (
-                <label
-                  htmlFor={attachmentInputId}
-                  className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
-                >
-                  {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
-                </label>
-              )}
-            </span>
-          </Tooltip>
-          {!isGroupChat && (
-            <Select
-              className="chat-composer__agent-select"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder={agentsReady ? '默认智能体' : '加载智能体…'}
-              loading={!agentsReady}
-              disabled={!isUserLoggedIn() || submitting || Boolean(activeInterruptForm) || chatAgentOptions.length === 0}
-              value={selectedAgentId}
-              onChange={(v) => setSelectedAgentId(v ?? undefined)}
-              options={chatAgentOptions}
-              popupMatchSelectWidth={false}
-              suffixIcon={<RobotOutlined className="chat-composer__agent-select-icon" />}
-              notFoundContent={agentsReady ? '暂无已绑定模型的智能体' : null}
-            />
+              </div>
+              <div className="chat-composer__attachments-inner">
+                {pendingAttachments.map((f) => (
+                  <UserAttachmentCard
+                    key={f.id}
+                    fileName={f.name}
+                    mime={f.file_type || 'application/octet-stream'}
+                    typeLabel={
+                      f.uploading ? '上传中' : f.type_label || friendlyFileTypeLabel(f.file_type || '', f.name)
+                    }
+                    uploading={f.uploading}
+                    previewUrl={f.preview_url}
+                    compact
+                    onRemove={
+                      !f.uploading
+                        ? () => setPendingAttachments((prev) => prev.filter((x) => x.id !== f.id))
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+            </div>
           )}
         </div>
-        <Tooltip title="发送（Enter）">
-          <span className="chat-composer__tooltip-anchor">
-            <button
-              type="button"
-              className={`chat-composer__send${submitting ? ' chat-composer__send--loading' : ''}`}
+        <div
+          className={`chat-composer chat-composer--capsule${composerFocused ? ' chat-composer--focused' : ''}`}
+        >
+          <div className="chat-composer__input-row">
+            <TextArea
+              className="chat-composer__textarea"
+              value={input}
+              placeholder={
+                !isUserLoggedIn()
+                  ? '请先登录后再发送消息'
+                  : hasSelectedSession
+                    ? '发消息…'
+                    : isGroupChat
+                      ? '发送消息开始群聊'
+                      : '发送消息开始对话'
+              }
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              onFocus={() => setComposerFocused(true)}
               disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
-              onClick={() => void sendMessage()}
-              aria-label="发送"
-            >
-              {submitting ? <span className="chat-composer__spinner chat-composer__spinner--light" /> : <ArrowUpOutlined />}
-            </button>
-          </span>
-        </Tooltip>
+              autoSize={{ minRows: 1, maxRows: 8 }}
+              variant="borderless"
+            />
+          </div>
+          <div className="chat-composer__footer">
+            <div className="chat-composer__capsule-tools">
+              <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
+                <span className="chat-composer__tooltip-anchor">
+                  {!isUserLoggedIn() || submitting || activeInterruptForm ? (
+                    <span
+                      className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
+                      aria-disabled
+                    >
+                      <PlusOutlined />
+                    </span>
+                  ) : (
+                    <label
+                      htmlFor={attachmentInputId}
+                      className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
+                    >
+                      {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
+                    </label>
+                  )}
+                </span>
+              </Tooltip>
+              {!isGroupChat && (
+                <Select
+                  className="chat-composer__agent-select"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={agentsReady ? '默认智能体' : '加载智能体…'}
+                  loading={!agentsReady}
+                  disabled={
+                    !isUserLoggedIn() ||
+                    submitting ||
+                    Boolean(activeInterruptForm) ||
+                    chatAgentOptions.length === 0
+                  }
+                  value={selectedAgentId}
+                  onChange={(v) => setSelectedAgentId(v ?? undefined)}
+                  options={chatAgentOptions}
+                  popupMatchSelectWidth={false}
+                  suffixIcon={<RobotOutlined className="chat-composer__agent-select-icon" />}
+                  notFoundContent={agentsReady ? '暂无已绑定模型的智能体' : null}
+                />
+              )}
+            </div>
+            <Tooltip title="发送（Enter）">
+              <span className="chat-composer__tooltip-anchor">
+                <button
+                  type="button"
+                  className={`chat-composer__send chat-composer__send--round${submitting ? ' chat-composer__send--loading' : ''}`}
+                  disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
+                  onClick={() => void sendMessage()}
+                  aria-label="发送"
+                >
+                  {submitting ? (
+                    <span className="chat-composer__spinner chat-composer__spinner--light" />
+                  ) : (
+                    <ArrowUpOutlined />
+                  )}
+                </button>
+              </span>
+            </Tooltip>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div ref={chatViewportRootRef} className="chat-viewport-root">
@@ -1173,12 +1224,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         <div className="chat-session-root">
           <Row
             className="chat-session-row"
-            gutter={[16, 16]}
+            gutter={[0, 0]}
             align="stretch"
             style={{ flex: 1, minHeight: 0, width: '100%' }}
           >
             {isGroupChat && hasSelectedSession && (
-              <Col xs={24} lg={5}>
+              <Col xs={24} lg={5} className="chat-session-col chat-session-col--members">
                 <Card
                   className="portal-card chat-side-panel-card"
                   variant="borderless"
@@ -1230,7 +1281,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               </Col>
             )}
 
-            <Col xs={24} lg={isGroupChat ? 13 : 18}>
+            <Col xs={24} lg={isGroupChat ? 13 : 18} className="chat-session-col chat-session-col--dialog">
               <Card
                 className="portal-card chat-main-dialog-card"
                 variant="borderless"
@@ -1246,20 +1297,23 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                   </div>
                 ) : chatMessages.length === 0 && activeInterruptForm ? (
                   <div className="chat-dialog-body">
-                    <div ref={scrollPanelRef} className="chat-scroll-panel">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{renderInterruptForm()}</div>
+                    <div ref={scrollPanelRef} className="chat-scroll-panel chat-thread">
+                      <div className="chat-thread__inner">{renderInterruptForm()}</div>
                     </div>
                     {renderComposer()}
                   </div>
                 ) : (
                   <div className="chat-dialog-body">
-                    <div ref={scrollPanelRef} className="chat-scroll-panel">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {chatMessages.map((item) => (
-                          <div key={item.id} className={`chat-row ${item.role === 'user' ? 'chat-row-self' : 'chat-row-speaker'}`}>
-                            {item.role === 'user' ? (
-                              <div className="chat-user-message-stack">
-                                {(item.attachments?.length ?? 0) > 0 && (
+                    <div ref={scrollPanelRef} className="chat-scroll-panel chat-thread">
+                      <div className="chat-thread__inner">
+                        {chatMessages.map((item, index) =>
+                          item.role === 'user' ? (
+                            <ChatUserMessage
+                              key={item.id}
+                              content={item.content}
+                              enterIndex={index}
+                              attachments={
+                                (item.attachments?.length ?? 0) > 0 ? (
                                   <div className="chat-user-attachment-stack">
                                     {item.attachments!.map((a) => (
                                       <UserAttachmentCard
@@ -1271,22 +1325,20 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                                       />
                                     ))}
                                   </div>
-                                )}
-                                {item.content ? (
-                                  <div className="chat-bubble chat-bubble-self chat-bubble-self--neutral">
-                                    <Typography.Text strong>我</Typography.Text>
-                                    <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <div className="chat-bubble chat-bubble-speaker">
-                                <Typography.Text strong>{item.title}</Typography.Text>
-                                <Typography.Paragraph className="chat-paragraph">{item.content}</Typography.Paragraph>
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                                ) : undefined
+                              }
+                            />
+                          ) : (
+                            <ChatAiMessage
+                              key={item.id}
+                              title={item.title}
+                              content={item.content}
+                              streaming={item.streaming}
+                              enterIndex={index}
+                            />
+                          ),
+                        )}
+                        {showThinking ? <ChatThinkingIndicator /> : null}
                         {renderInterruptForm()}
                       </div>
                     </div>
@@ -1298,7 +1350,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
             </Col>
 
             {hasSelectedSession && (
-              <Col xs={24} lg={6}>
+              <Col xs={24} lg={6} className="chat-session-col chat-session-col--workspace">
                 <Card className="portal-card chat-side-panel-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
                   {workspaceFiles.length === 0 ? (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />

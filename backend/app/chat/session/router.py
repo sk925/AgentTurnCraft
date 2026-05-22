@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.chat.base.schemas import ApiResponse, success_response
 from app.chat.group.chat_graph import get_checkpointer
-from app.chat.session.delete_service import delete_session_records, purge_session_runtime_state
+from app.chat.session.delete_service import (
+    delete_session_records,
+    purge_session_runtime_state,
+    purge_session_workspace,
+)
 from app.chat.session.schemas import ChatSessionMessageFileInfo, ChatSessionMessageResponse, ChatSessionResponse
 from app.chat.session.service import get_session, list_sessions
 
@@ -161,12 +165,14 @@ async def delete_session(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """删除会话：agent_log、chat_session、主图/子图 LangGraph 状态与 Redis 轮次缓存。"""
+    """删除会话：agent_log、chat_session、LangGraph 状态、Redis 轮次缓存与会话工作空间目录。"""
     try:
         checkpointer = get_checkpointer()
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
-    thread_ids, round_ids = delete_session_records(db, session_id, current_user.id)
+    member_id = current_user.id
+    thread_ids, round_ids = delete_session_records(db, session_id, member_id)
+    purge_session_workspace(member_id, session_id)
     await purge_session_runtime_state(checkpointer, session_id, thread_ids, round_ids)
     return success_response({"deleted": True, "session_id": str(session_id)}, message="删除成功")
