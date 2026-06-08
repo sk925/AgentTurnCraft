@@ -5,7 +5,7 @@ from typing import Any, TypedDict
 from app.chat.base.models import Agent, AgentService
 from app.chat.deepseek_chat_openai import DeepSeekChatOpenAI
 from app.chat.group.event_publisher import EventPublisher
-from app.chat.group.speaker import artifact_dir, stream_messages, stream_updates
+from app.chat.group.speaker import stream_messages, stream_updates
 from app.config import settings
 from app.database import transactional_session
 from app.exceptions import AppException
@@ -22,6 +22,8 @@ from app.config import _BACKEND_ROOT
 from app.chat.group.chat_graph import get_checkpointer
 
 logger = logging.getLogger(__name__)
+
+artifact_dir = "/workspace" # 产物目录
 
 BASE_RULE = """
 <base_rule>
@@ -58,7 +60,7 @@ BASE_RULE = """
 - 用户意图不明确，需要向用户收集信息
 - 询问用户问题
 
-### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则：workspace/member_id/session_id/round_id)
+### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则: /workspace/member_id/session_id/round_id)
 {output_dir}
 
 </base_rule>
@@ -98,8 +100,8 @@ def wrap_dynamic_prompt(request: ModelRequest) -> str:
     member_id = ctx.get("user_id", "")
     session_id = ctx.get("session_id", "")
     round_id = ctx.get("round_id", "")
-    output_dir = artifact_dir / f"{member_id}/{session_id}/{round_id}"
-    base_rule_prompt = BASE_RULE.format(output_dir=output_dir.resolve().as_posix())
+    output_dir = f"{artifact_dir}/{member_id}/{session_id}/{round_id}"
+    base_rule_prompt = BASE_RULE.format(output_dir=output_dir)
     frame_setting = FRAMEQORK_SETTING.format(frame_setting=deep_agent_prompt)
     user_custom_prompt = USER_CUSTOM_PROMPT.format(
         user_custom_prompt=ctx.get("user_custom_prompt", "") or ""

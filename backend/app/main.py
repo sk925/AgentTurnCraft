@@ -9,7 +9,7 @@ configure_logging()
 
 from app.exceptions import register_exception_handler
 from app.chat.chat_router import router as chat_router
-from app.chat.group.chat_graph import set_checkpointer
+from app.chat.group.chat_graph import set_checkpointer, set_sub_checkpointer
 from app.redis_client import init_redis, close_redis
 from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
 from app.chat.session import router as session_router
@@ -50,11 +50,21 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.checkpointer_cm = checkpointer_cm
     set_checkpointer(checkpointer)
+
+    # 子图（speaker deep agent）使用独立的 checkpointer，避免与父图 checkpoint 冲突
+    sub_checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.database_url)
+    sub_checkpointer = await sub_checkpointer_cm.__aenter__()
+    await sub_checkpointer.setup()
+    app.state.sub_checkpointer = sub_checkpointer
+    app.state.sub_checkpointer_cm = sub_checkpointer_cm
+    set_sub_checkpointer(sub_checkpointer)
+
     await init_redis()
     try:
         yield
     finally:
         await close_redis()
+        await sub_checkpointer_cm.__aexit__(None, None, None)
         await checkpointer_cm.__aexit__(None, None, None)
 
 

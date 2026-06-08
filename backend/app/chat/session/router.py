@@ -106,6 +106,8 @@ def _agent_log_row_to_chat_message(row: AgentLog, db: Session, member_id: int) -
         speaker_id=row.speaker_id,
         speaker_name=row.speaker_name,
         file_info=file_info,
+        tool_call_id=row.tool_call_id,
+        tool_calls=row.tool_calls,
     )
 
 

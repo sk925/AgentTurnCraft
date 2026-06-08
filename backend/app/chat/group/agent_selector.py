@@ -112,6 +112,9 @@ def select_agent(window_state: WindowState) -> GroupSelection:
         SystemMessage(content=prompt),
         HumanMessage(content=user_message),
     ]
+    print("======select_agent-messages==============")
+    print(messages)
+    print("======select_agent-messages==============")
     result = structured.invoke(messages,config={"response_format": GroupSelection, "tools": [parse_file_by_id]})
 
     raw_data = result.get("raw", None)

@@ -243,6 +243,14 @@ export interface SessionMessageFileInfo {
   file_type?: string;
 }
 
+export interface SessionToolCallItem {
+  tool_name: string;
+  tool_args?: Record<string, unknown> | string | null;
+  tool_id: string;
+  /** 由前端在加载历史时合并 tool_out 填入 */
+  result?: string | null;
+}
+
 export interface SessionMessage {
   role_type: 'user' | 'agent_selector' | 'speaker_selector' | 'speaker' | 'assistant';
   message_type: string | null;
@@ -250,6 +258,8 @@ export interface SessionMessage {
   speaker_id: number | null;
   speaker_name: string | null;
   file_info?: SessionMessageFileInfo[] | null;
+  tool_call_id?: string | null;
+  tool_calls?: SessionToolCallItem[] | null;
 }
 
 export interface ChatStartEvent {
@@ -332,6 +342,24 @@ export interface ChatSpeakerInterruptEvent {
   tool_id?: string;
 }
 
+/** 实时：工具调用（与历史 message_type=tool_call 对齐） */
+export interface ChatSpeakerToolCallEvent {
+  event: 'speaker_tool_call';
+  speaker_id: number;
+  speaker_name: string;
+  tool_calls: SessionToolCallItem[];
+}
+
+/** 实时：工具执行结果（与历史 message_type=tool_out 对齐） */
+export interface ChatSpeakerToolOutEvent {
+  event: 'speaker_tool_out';
+  speaker_id: number;
+  speaker_name: string;
+  tool_name: string;
+  tool_id: string;
+  content: string;
+}
+
 export type ChatWindowEvent =
   | ChatStartEvent
   | ChatFinishedEvent
@@ -341,7 +369,9 @@ export type ChatWindowEvent =
   | ChatSpeakerEvent
   | ChatSpeakerStreamEvent
   | ChatSpeakerModelStreamEvent
-  | ChatSpeakerInterruptEvent;
+  | ChatSpeakerInterruptEvent
+  | ChatSpeakerToolCallEvent
+  | ChatSpeakerToolOutEvent;
 
 function parseSSEChunk(chunk: string): ChatWindowEvent[] {
   const events: ChatWindowEvent[] = [];

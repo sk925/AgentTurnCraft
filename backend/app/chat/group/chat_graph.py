@@ -15,6 +15,9 @@ event_publisher = EventPublisher()
 def build_graph(checkpointer) -> CompiledStateGraph:
     """创建群聊工作流"""
 
+    # 子图（speaker deep agent）使用独立的 checkpointer，避免与父图 checkpoint 冲突
+    sub_checkpointer = _SUB_CHECKPOINTER
+
     def select_agents_node(window_state: WindowState):
         """筛选可用员工"""
         group_selection: GroupSelection = select_agent(window_state)
@@ -78,6 +81,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
                     "group_members": group_members,
                     "select_reason": group_selection.reason,
                     "session_messages": chat_messages,
+               
                 },
             )
 
@@ -125,19 +129,23 @@ def build_graph(checkpointer) -> CompiledStateGraph:
                 "current_turn": current_turn,
                 "speaker_reason": speaker_selection.reason,
                 "session_messages": chat_messages,
-                "interrupt_data": {},
+                "question_data": {},
             },
         )
 
     async def speak_node(window_state: WindowState):
         """发言人发言"""
+        print("======speak_node_start==============")
+        print(window_state)
+        print("======speak_node_start==============")
+
         current_speaker = window_state.get("current_speaker", {})
         session_id = str(window_state.get("session_id", ""))
         round_id = str(window_state.get("round_id", ""))
         publisher = EventPublisher()
-        state_interrupt_data = window_state.get("interrupt_data", {})
+        state_interrupt_data = window_state.get("user_input", {})
 
-        compiled_graph, speaker_prompt = speak_agent(window_state, checkpointer)
+        compiled_graph, speaker_prompt = speak_agent(window_state, sub_checkpointer if sub_checkpointer else checkpointer)
         config = {
             "configurable": {
                 "thread_id": f"{window_state.get('session_id', 0)}_{current_speaker.get('id', 0)}"
@@ -148,9 +156,6 @@ def build_graph(checkpointer) -> CompiledStateGraph:
         else:
             stream_input = {"messages": [{"role": "user", "content": "根据上下文回答用户问题或执行任务或进行讨论"}]}
 
-        print("======speak_node_stream_input==============")
-        print(stream_input)
-        print("======speak_node_stream_input==============")
         
         # 先按角色过滤（仅用户/发言人），再取最近 6 条
         history_messages = window_state.get("session_messages", [])
@@ -179,7 +184,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
 
         last_updates = None
         
-        interrupt_data = {}
+        question_data = {}
         
         async for mode, data in compiled_graph.astream(
             stream_input,
@@ -191,64 +196,76 @@ def build_graph(checkpointer) -> CompiledStateGraph:
             if mode == "updates":
                 if isinstance(data, dict):
                     if data.get('__interrupt__'):
-                        interrupt_data = data.get('__interrupt__')[0].value
-
+                        question_data = data.get('__interrupt__')[0].value
                 if data.get("model"):
                     last_updates = data
                 await stream_updates(data, publisher, session_id, round_id, current_speaker, window_state.get("user_profile", {}).get("member_id", 0))
             elif mode == "messages":
                 await stream_messages(data, publisher, session_id, round_id, current_speaker)
        
-        if interrupt_data:
+        if question_data:
             # 跳转到打断节点
-            return Command(goto="interrupt_node", update={"interrupt_data": interrupt_data})
+            return Command(goto="interrupt_node", update={"question_data": question_data})
     
 
-        transcript = window_state.get("transcript", [])
-        transcript.append(
-            {
-                "speaker_id": current_speaker.get("id", ""),
-                "speaker_name": current_speaker.get("name", ""),
-                "content": last_updates.get("model").get("messages")[0].content,
-                "timestamp": time.time(),
-            }
-        )
-
+        transcript: list[dict] = window_state.get("transcript", [])
         chat_messages: list[ChatRecord] = window_state.get("session_messages", [])
-        chat_messages.append(
-            ChatRecord(
-                role_type=RoleType.SPEAKER.value,
-                message_type=MsgType.MODEL.value,
-                message_content=last_updates.get("model").get("messages")[0].content,
-                speaker_id=current_speaker.get("id"),
-                speaker_name=current_speaker.get("name"),
+        print("======last_updates==============")
+        print(last_updates)
+        print("======last_updates==============")
+        if last_updates:
+            speaker_content = last_updates.get("model").get("messages")[0].content
+            # 原地修改（与 select_speaker_node 保持一致），避免 async 节点返回新 list 导致状态不持久化
+            transcript.append(
+                {
+                    "speaker_id": current_speaker.get("id", ""),
+                    "speaker_name": current_speaker.get("name", ""),
+                    "content": speaker_content,
+                    "timestamp": time.time(),
+                },
             )
-        )
+            chat_messages.append(
+                ChatRecord(
+                    role_type=RoleType.SPEAKER.value,
+                    message_type=MsgType.MODEL.value,
+                    message_content=speaker_content,
+                    speaker_id=current_speaker.get("id"),
+                    speaker_name=current_speaker.get("name"),
+                ),
+            )
+
+        print("======chat_messages==============")
+        print(chat_messages)
+        print("======chat_messages==============")
+
+        
         group_members = window_state.get("group_members", [])
         if len(group_members) == 1:
             return Command(
-                goto=END, update={"finished": True, "answer": "处理完成", "session_messages": chat_messages, "finish_reason": "处理完成"}
+                goto='finnish_node', update={"finished": True, "answer": "处理完成", "session_messages": chat_messages, "finish_reason": "处理完成","question_data": {},"user_input": {}}
             )
         else:
-            return Command(goto="select_speaker_node", update={"transcript": transcript, "session_messages": chat_messages})
+            return Command(goto="select_speaker_node", update={"transcript": transcript, "session_messages": chat_messages,"question_data": {},"user_input": {}})
         
     def interrupt_node(window_state: WindowState):
         """打断节点"""
         
-        interrupt_data = window_state.get("interrupt_data", {})
-        user_input = interrupt(interrupt_data)
+        question_data = window_state.get("question_data", {})
+        user_input = interrupt(question_data)
+
        
         if user_input.get("cancel"):
             return Command(goto=END, update={"finished": True, "answer": "您停止执行"})
         else:
             input_data = user_input.get("data")
             if input_data:
-                print("======interrupt_node==============")
-                print("interrupt_node")
-                print("======interrupt_node==============")
-                interrupt_data = user_input
-                return Command(goto="speak_node", update={"interrupt_data": interrupt_data})
+                return Command(goto="speak_node", update={"user_input": user_input})
         return Command(goto=END, update={"finished": True, "answer": "处理完成","finish_reason": "处理完成"})
+
+
+    def finnish_node(window_state: WindowState):
+        """完成节点"""
+        return Command(goto=END)
 
 
 
@@ -257,6 +274,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
     state_graph.add_node("select_speaker_node", select_speaker_node)
     state_graph.add_node("speak_node", speak_node)
     state_graph.add_node("interrupt_node", interrupt_node)
+    state_graph.add_node("finnish_node", finnish_node)
     state_graph.add_edge(START, "select_agents_node")
     return state_graph.compile(checkpointer=checkpointer)
 
@@ -285,11 +303,17 @@ def get_chat_window_graph(checkpointer) -> CompiledStateGraph:
 
 # WebSocket handler 通过模块变量访问 checkpointer，避免 websocket.app.state 兼容问题
 _CHECKPOINTER = None
+_SUB_CHECKPOINTER = None
 
 
 def set_checkpointer(checkpointer) -> None:
     global _CHECKPOINTER
     _CHECKPOINTER = checkpointer
+
+
+def set_sub_checkpointer(checkpointer) -> None:
+    global _SUB_CHECKPOINTER
+    _SUB_CHECKPOINTER = checkpointer
 
 
 def get_checkpointer():

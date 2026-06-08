@@ -32,4 +32,6 @@ class ChatSessionMessageResponse(BaseModel):
     speaker_id: int | None = None
     speaker_name: str | None = None
     file_info: list[ChatSessionMessageFileInfo] | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict] | None = None
 

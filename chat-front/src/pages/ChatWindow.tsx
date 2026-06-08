@@ -24,6 +24,7 @@ import {
   Row,
   Select,
   Space,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -39,8 +40,10 @@ import {
   FileTextOutlined,
   FileWordOutlined,
   CloseOutlined,
+  LeftOutlined,
   LoadingOutlined,
   PlusOutlined,
+  RightOutlined,
   RobotOutlined,
   TeamOutlined,
   UserOutlined,
@@ -64,6 +67,7 @@ import type {
   ChatWindowEvent,
   Group,
   SessionMessage,
+  SessionToolCallItem,
   SessionType,
   SpeakerInterruptArgs,
   WSServerMessage,
@@ -71,10 +75,39 @@ import type {
 } from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePortalSessions } from '../PortalSessionsContext';
-import { ChatAiMessage, ChatThinkingIndicator, ChatUserMessage } from '../components/chat/ChatMessageView';
+import {
+  ChatAiMessage,
+  ChatThinkingIndicator,
+  ChatToolCallMessage,
+  ChatUserMessage,
+} from '../components/chat/ChatMessageView';
 import './ChatWindow.css';
 
 const { TextArea } = Input;
+
+const SHOW_TOOL_CALLS_STORAGE_KEY = 'free-chat:show-tool-calls';
+const WORKSPACE_COLLAPSED_STORAGE_KEY = 'free-chat:workspace-collapsed';
+
+function readShowToolCallsPreference(): boolean {
+  try {
+    const raw = localStorage.getItem(SHOW_TOOL_CALLS_STORAGE_KEY);
+    if (raw === '0' || raw === 'false') {
+      return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function readWorkspaceCollapsedPreference(): boolean {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_COLLAPSED_STORAGE_KEY);
+    return raw === '1' || raw === 'true';
+  } catch {
+    return false;
+  }
+}
 
 /** 上传完成后的附件元数据（用于气泡展示） */
 type ChatAttachmentMeta = {
@@ -208,17 +241,202 @@ function UserAttachmentCard({
   );
 }
 
+type ChatMessageKind = 'user' | 'speaker' | 'tool_call';
+
 type ChatMessage = {
   id: string;
+  kind: ChatMessageKind;
   role: 'user' | 'system' | 'speaker';
   title: string;
   content: string;
   speakerId?: number;
   /** 当前是否仍在接收 speaker_stream */
   streaming?: boolean;
+  /** 为 false 时跳过入场动画（历史记录），减轻滚动重绘 */
+  animate?: boolean;
   /** 用户消息附带的文件（仅前端展示；历史接口未返回时为空） */
   attachments?: ChatAttachmentMeta[];
+  /** 历史 tool_call */
+  toolCalls?: SessionToolCallItem[];
 };
+
+/** tool_out 合并到对应 tool_call 卡片（按 tool_id 匹配；可选限定 speaker） */
+function attachToolResultToMessages(
+  messages: ChatMessage[],
+  toolCallId: string | null | undefined,
+  result: string,
+  speakerId?: number,
+): ChatMessage[] {
+  if (!toolCallId) {
+    return messages;
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.kind !== 'tool_call' || !m.toolCalls?.length) {
+      continue;
+    }
+    if (speakerId != null && m.speakerId !== speakerId) {
+      continue;
+    }
+    const ti = m.toolCalls.findIndex((t) => t.tool_id === toolCallId);
+    if (ti < 0) {
+      continue;
+    }
+    const toolCalls = m.toolCalls.map((t, idx) => (idx === ti ? { ...t, result } : t));
+    const next = [...messages];
+    next[i] = { ...m, toolCalls };
+    return next;
+  }
+  return messages;
+}
+
+function clearSpeakerStreaming(messages: ChatMessage[], speakerId: number): ChatMessage[] {
+  return messages.map((m) =>
+    m.role === 'speaker' && m.streaming && m.speakerId === speakerId
+      ? { ...m, streaming: false }
+      : m,
+  );
+}
+
+function normalizeSpeakerId(id: unknown): number | null {
+  if (id == null || id === '') {
+    return null;
+  }
+  const n = Number(id);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 将接口记录转为时间线消息；tool_out 合并到对应 tool_call 卡片（按 tool_call_id 匹配 tool_id） */
+function sessionRecordsToChatMessages(records: SessionMessage[]): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+
+  const attachToolResult = (toolCallId: string | null | undefined, result: string) => {
+    const next = attachToolResultToMessages(messages, toolCallId, result);
+    if (next !== messages) {
+      messages.length = 0;
+      messages.push(...next);
+    }
+  };
+
+  records.forEach((record, index) => {
+    if (record.role_type === 'user' || record.message_type === 'user') {
+      const attachments =
+        record.file_info && record.file_info.length > 0
+          ? record.file_info.map((f) => ({
+              id: f.file_id,
+              file_name: f.file_name,
+              file_type: f.file_type || 'application/octet-stream',
+              type_label: friendlyFileTypeLabel(f.file_type || '', f.file_name),
+              preview_url: f.file_url,
+            }))
+          : undefined;
+      messages.push({
+        id: `history-user-${index}`,
+        kind: 'user',
+        role: 'user',
+        title: record.speaker_name || '我',
+        content: record.message_content,
+        attachments,
+        animate: false,
+      });
+      return;
+    }
+
+    const speakerTitle = record.speaker_name || '超级助手';
+    const speakerId = record.speaker_id ?? undefined;
+    const msgType = (record.message_type || '').toLowerCase();
+
+    if (record.role_type === 'speaker' && msgType === 'tool_out') {
+      attachToolResult(record.tool_call_id, record.message_content);
+      return;
+    }
+
+    if (record.role_type === 'speaker' && msgType === 'tool_call') {
+      const toolCalls = Array.isArray(record.tool_calls) ? [...record.tool_calls] : [];
+      if (toolCalls.length === 0) {
+        return;
+      }
+      messages.push({
+        id: `history-tool-call-${index}`,
+        kind: 'tool_call',
+        role: 'speaker',
+        title: speakerTitle,
+        content: '',
+        speakerId,
+        toolCalls,
+        animate: false,
+      });
+      return;
+    }
+
+    if (msgType === 'todo_list' || msgType === 'interactive') {
+      return;
+    }
+
+    const text = (record.message_content || '').trim();
+    if (!text) {
+      return;
+    }
+
+    messages.push({
+      id: `history-speaker-${index}`,
+      kind: 'speaker',
+      role: 'speaker',
+      title: speakerTitle,
+      content: record.message_content,
+      speakerId,
+      animate: false,
+    });
+  });
+
+  return messages;
+}
+
+/** 发言人侧消息的唯一键（用户消息返回 null） */
+function getMessageSpeakerKey(msg: ChatMessage): string | null {
+  if (msg.kind === 'user' || msg.role === 'user') {
+    return null;
+  }
+  if (msg.speakerId != null) {
+    return `id:${msg.speakerId}`;
+  }
+  return `name:${msg.title}`;
+}
+
+/** 相对前序可见消息，该 speaker 是否应显示头像 */
+function shouldShowSpeakerAvatarAfterPrevious(
+  messages: ChatMessage[],
+  speakerKey: string,
+  showToolCalls: boolean,
+  beforeIndex = messages.length,
+): boolean {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    const prev = messages[i];
+    if (prev.kind === 'user' || prev.role === 'user') {
+      return true;
+    }
+    if (prev.kind === 'tool_call' && !showToolCalls) {
+      continue;
+    }
+    if (prev.kind === 'tool_call' || prev.kind === 'speaker') {
+      return getMessageSpeakerKey(prev) !== speakerKey;
+    }
+  }
+  return true;
+}
+
+/** 连续同一 speaker 时仅首条显示头像（跳过已隐藏的工具卡） */
+function shouldShowSpeakerAvatar(
+  messages: ChatMessage[],
+  index: number,
+  showToolCalls: boolean,
+): boolean {
+  const currentKey = getMessageSpeakerKey(messages[index]);
+  if (!currentKey) {
+    return true;
+  }
+  return shouldShowSpeakerAvatarAfterPrevious(messages, currentKey, showToolCalls, index);
+}
 
 type PendingAttachment = {
   id: string;
@@ -337,7 +555,23 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   /** speaker_interrupt：待用户填写的表单 */
   const [activeInterruptForm, setActiveInterruptForm] = useState<ActiveInterruptForm | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [showToolCalls, setShowToolCalls] = useState(readShowToolCallsPreference);
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(readWorkspaceCollapsedPreference);
+
+  const toggleWorkspaceCollapsed = useCallback(() => {
+    setWorkspaceCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(WORKSPACE_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
   const scrollPanelRef = useRef<HTMLDivElement>(null);
+  /** 用户未上滑时保持贴底，避免工具卡插入/结果回填时整页抖动 */
+  const stickToBottomRef = useRef(true);
   /** 用视口像素高度约束整块聊天区，避免 Ant Layout/Row/Card 链上 min-height:auto 撑开导致内部无法滚动 */
   const chatViewportRootRef = useRef<HTMLDivElement>(null);
   const attachmentInputId = `chat-attachment-${useId().replace(/:/g, '')}`;
@@ -396,22 +630,41 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       el.style.height = '';
       el.style.maxHeight = '';
     };
-  }, [syncChatViewportHeight, hasSelectedSession, isGroupChat, location.pathname, messages.length]);
+  }, [syncChatViewportHeight, hasSelectedSession, isGroupChat, location.pathname]);
 
-  const scrollChatToBottom = useCallback(() => {
+  const scrollChatToBottom = useCallback((opts?: { force?: boolean }) => {
     const el = scrollPanelRef.current;
     if (!el) {
       return;
     }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (!opts?.force && distanceFromBottom > 96) {
+      stickToBottomRef.current = false;
+      return;
+    }
+    stickToBottomRef.current = true;
     el.scrollTop = el.scrollHeight;
   }, []);
 
+  useEffect(() => {
+    const el = scrollPanelRef.current;
+    if (!el) {
+      return;
+    }
+    const onScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distanceFromBottom <= 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [hasSelectedSession, messages.length]);
+
   useLayoutEffect(() => {
+    if (!stickToBottomRef.current) {
+      return;
+    }
     scrollChatToBottom();
-    const id = requestAnimationFrame(() => {
-      scrollChatToBottom();
-    });
-    return () => cancelAnimationFrame(id);
   }, [messages, scrollChatToBottom]);
 
   const currentSpeakerId = useMemo(() => {
@@ -513,35 +766,6 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       .map((a) => ({ label: a.name, value: a.id }));
   }, [agents]);
 
-  const toChatMessage = (record: SessionMessage, index: number): ChatMessage => {
-    if (record.role_type === 'user') {
-      const attachments =
-        record.file_info && record.file_info.length > 0
-          ? record.file_info.map((f) => ({
-              id: f.file_id,
-              file_name: f.file_name,
-              file_type: f.file_type || 'application/octet-stream',
-              type_label: friendlyFileTypeLabel(f.file_type || '', f.file_name),
-              preview_url: f.file_url,
-            }))
-          : undefined;
-      return {
-        id: `history-user-${index}`,
-        role: 'user',
-        title: record.speaker_name || '我',
-        content: record.message_content,
-        attachments,
-      };
-    }
-    return {
-      id: `history-speaker-${index}`,
-      role: 'speaker',
-      title: record.speaker_name || '超级助手',
-      content: record.message_content,
-      speakerId: record.speaker_id ?? undefined,
-    };
-  };
-
   const appendMessage = (msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
   };
@@ -591,11 +815,20 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
-        setCurrentSpeaker(event.current_speaker);
+        {
+          const id = normalizeSpeakerId(event.current_speaker?.id);
+          if (id != null) {
+            setCurrentSpeaker({ id, name: event.current_speaker.name ?? '' });
+          }
+        }
         break;
       case 'speaker_stream':
       case 'speaker_model_stream': {
         const { speaker_id, speaker_name } = event;
+        const activeSpeakerId = normalizeSpeakerId(speaker_id);
+        if (activeSpeakerId != null) {
+          setCurrentSpeaker({ id: activeSpeakerId, name: speaker_name ?? '' });
+        }
         let delta = event.delta ?? '';
         if (!delta && 'content' in event) {
           delta = event.content ?? '';
@@ -615,6 +848,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               ...prev,
               {
                 id: `speaker-stream-${speaker_id}-${Date.now()}`,
+                kind: 'speaker',
                 role: 'speaker',
                 title: speaker_name,
                 content: delta,
@@ -668,6 +902,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
             ...prev,
             {
               id: `speaker-${Date.now()}`,
+              kind: 'speaker',
               role: 'speaker',
               title: event.speaker_name,
               content: event.content,
@@ -676,6 +911,41 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           ];
         });
         break;
+      case 'speaker_tool_call': {
+        const toolCalls = Array.isArray(event.tool_calls) ? event.tool_calls : [];
+        if (toolCalls.length === 0) {
+          break;
+        }
+        const activeSpeakerId = normalizeSpeakerId(event.speaker_id);
+        if (activeSpeakerId != null) {
+          setCurrentSpeaker({ id: activeSpeakerId, name: event.speaker_name ?? '' });
+        }
+        setMessages((prev) => [
+          ...clearSpeakerStreaming(prev, event.speaker_id),
+          {
+            id: `live-tool-call-${event.speaker_id}-${Date.now()}`,
+            kind: 'tool_call',
+            role: 'speaker',
+            title: event.speaker_name,
+            content: '',
+            speakerId: event.speaker_id,
+            toolCalls: toolCalls.map((tc) => ({
+              tool_name: tc.tool_name,
+              tool_args: tc.tool_args,
+              tool_id: tc.tool_id,
+            })),
+            animate: false,
+          },
+        ]);
+        break;
+      }
+      case 'speaker_tool_out': {
+        const result = event.content ?? '';
+        setMessages((prev) =>
+          attachToolResultToMessages(prev, event.tool_id, result, event.speaker_id),
+        );
+        break;
+      }
       case 'speaker_interrupt':
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
         interruptRoundIdRef.current = roundIdRef.current;
@@ -708,6 +978,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         if (event.answer) {
           appendMessage({
             id: `finish-${Date.now()}`,
+            kind: 'speaker',
             role: 'speaker',
             title: '超级助手',
             content: event.answer,
@@ -880,8 +1151,10 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
     const displayContent = text;
 
+    stickToBottomRef.current = true;
     appendMessage({
       id: `user-${Date.now()}`,
+      kind: 'user',
       role: 'user',
       title: '我',
       content: displayContent,
@@ -900,6 +1173,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     setInput('');
     setSubmitting(true);
     liveChatRoundRef.current = true;
+    requestAnimationFrame(() => scrollChatToBottom({ force: true }));
 
     const sent = chatWebSocket.sendChat({
       user_message: text,
@@ -1056,7 +1330,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setPendingAttachments([]);
         await refreshWorkspaceFiles(selectedSessionId);
         const records = await sessionsApi.getMessages(selectedSessionId);
-        setMessages((Array.isArray(records) ? records : []).map(toChatMessage));
+        setMessages(sessionRecordsToChatMessages(Array.isArray(records) ? records : []));
         // 请求断线重放：如果当前有活跃 round，拉取流式增量
         chatWebSocket.sendCatchup(selectedSessionId);
       } catch (error) {
@@ -1140,7 +1414,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               onKeyDown={handleComposerKeyDown}
               onFocus={() => setComposerFocused(true)}
               disabled={submitting || !isUserLoggedIn() || Boolean(activeInterruptForm)}
-              autoSize={{ minRows: 1, maxRows: 8 }}
+              autoSize={{ minRows: 2, maxRows: 8 }}
               variant="borderless"
             />
           </div>
@@ -1221,9 +1495,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           <div className="chat-idle-shell__composer">{renderComposer()}</div>
         </div>
       ) : (
-        <div className="chat-session-root">
+        <div
+          className={`chat-session-root${workspaceCollapsed ? ' chat-session-root--workspace-collapsed' : ''}`}
+        >
           <Row
-            className="chat-session-row"
+            className={`chat-session-row chat-session-row--stretch${hasSelectedSession ? ' chat-session-row--has-workspace' : ''}`}
             gutter={[0, 0]}
             align="stretch"
             style={{ flex: 1, minHeight: 0, width: '100%' }}
@@ -1286,6 +1562,23 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                 className="portal-card chat-main-dialog-card"
                 variant="borderless"
                 title={isGroupChat ? '群聊对话' : '对话'}
+                extra={
+                  <label className="chat-dialog-tool-toggle">
+                    <span className="chat-dialog-tool-toggle__label">显示工具调用</span>
+                    <Switch
+                      size="small"
+                      checked={showToolCalls}
+                      onChange={(checked) => {
+                        setShowToolCalls(checked);
+                        try {
+                          localStorage.setItem(SHOW_TOOL_CALLS_STORAGE_KEY, checked ? '1' : '0');
+                        } catch {
+                          /* ignore */
+                        }
+                      }}
+                    />
+                  </label>
+                }
                 style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
               >
                 {chatMessages.length === 0 && !activeInterruptForm ? (
@@ -1306,39 +1599,75 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                   <div className="chat-dialog-body">
                     <div ref={scrollPanelRef} className="chat-scroll-panel chat-thread">
                       <div className="chat-thread__inner">
-                        {chatMessages.map((item, index) =>
-                          item.role === 'user' ? (
-                            <ChatUserMessage
-                              key={item.id}
-                              content={item.content}
-                              enterIndex={index}
-                              attachments={
-                                (item.attachments?.length ?? 0) > 0 ? (
-                                  <div className="chat-user-attachment-stack">
-                                    {item.attachments!.map((a) => (
-                                      <UserAttachmentCard
-                                        key={a.id}
-                                        fileName={a.file_name}
-                                        mime={a.file_type}
-                                        typeLabel={a.type_label}
-                                        previewUrl={a.preview_url}
-                                      />
-                                    ))}
-                                  </div>
-                                ) : undefined
-                              }
-                            />
-                          ) : (
+                        {chatMessages.map((item, index) => {
+                          const showSpeakerAvatar = shouldShowSpeakerAvatar(
+                            chatMessages,
+                            index,
+                            showToolCalls,
+                          );
+                          if (item.kind === 'user' || item.role === 'user') {
+                            return (
+                              <ChatUserMessage
+                                key={item.id}
+                                content={item.content}
+                                animate={item.animate !== false}
+                                enterIndex={index}
+                                attachments={
+                                  (item.attachments?.length ?? 0) > 0 ? (
+                                    <div className="chat-user-attachment-stack">
+                                      {item.attachments!.map((a) => (
+                                        <UserAttachmentCard
+                                          key={a.id}
+                                          fileName={a.file_name}
+                                          mime={a.file_type}
+                                          typeLabel={a.type_label}
+                                          previewUrl={a.preview_url}
+                                        />
+                                      ))}
+                                    </div>
+                                  ) : undefined
+                                }
+                              />
+                            );
+                          }
+                          if (item.kind === 'tool_call') {
+                            if (!showToolCalls) {
+                              return null;
+                            }
+                            return (
+                              <ChatToolCallMessage
+                                key={item.id}
+                                title={item.title}
+                                toolCalls={item.toolCalls ?? []}
+                                showAvatar={showSpeakerAvatar}
+                                animate={item.animate !== false}
+                                enterIndex={index}
+                              />
+                            );
+                          }
+                          return (
                             <ChatAiMessage
                               key={item.id}
                               title={item.title}
                               content={item.content}
                               streaming={item.streaming}
+                              showAvatar={showSpeakerAvatar}
+                              animate={item.animate !== false}
                               enterIndex={index}
                             />
-                          ),
-                        )}
-                        {showThinking ? <ChatThinkingIndicator /> : null}
+                          );
+                        })}
+                        {showThinking ? (
+                          <ChatThinkingIndicator
+                            showAvatar={shouldShowSpeakerAvatarAfterPrevious(
+                              chatMessages,
+                              currentSpeakerId != null
+                                ? `id:${currentSpeakerId}`
+                                : `name:${currentSpeaker?.name ?? 'AI'}`,
+                              showToolCalls,
+                            )}
+                          />
+                        ) : null}
                         {renderInterruptForm()}
                       </div>
                     </div>
@@ -1350,26 +1679,55 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
             </Col>
 
             {hasSelectedSession && (
-              <Col xs={24} lg={6} className="chat-session-col chat-session-col--workspace">
-                <Card className="portal-card chat-side-panel-card" variant="borderless" title="工作空间" style={{ height: '100%' }}>
-                  {workspaceFiles.length === 0 ? (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {workspaceFiles.map((item) => (
-                        <div key={`${item.round_id}-${item.relative_path}`} style={{ paddingBottom: 10, borderBottom: '1px solid #f0f0f0' }}>
-                          <Typography.Text strong>{item.name}</Typography.Text>
-                          <div>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              {item.relative_path}
-                            </Typography.Text>
-                          </div>
+              <aside
+                className={`chat-workspace-aside${workspaceCollapsed ? ' chat-workspace-aside--collapsed' : ''}`}
+                aria-label="工作空间"
+              >
+                <Tooltip
+                  title={workspaceCollapsed ? '展开工作空间' : '收起工作空间'}
+                  placement="left"
+                >
+                  <button
+                    type="button"
+                    className="chat-workspace-aside__toggle"
+                    onClick={toggleWorkspaceCollapsed}
+                    aria-expanded={!workspaceCollapsed}
+                    aria-label={workspaceCollapsed ? '展开工作空间' : '收起工作空间'}
+                  >
+                    {workspaceCollapsed ? <LeftOutlined /> : <RightOutlined />}
+                  </button>
+                </Tooltip>
+                {!workspaceCollapsed ? (
+                  <div className="chat-workspace-aside__body">
+                    <Card
+                      className="portal-card chat-side-panel-card chat-workspace-card"
+                      variant="borderless"
+                      title="工作空间"
+                      style={{ height: '100%' }}
+                    >
+                      {workspaceFiles.length === 0 ? (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
+                      ) : (
+                        <div className="chat-workspace-file-list">
+                          {workspaceFiles.map((item) => (
+                            <div
+                              key={`${item.round_id}-${item.relative_path}`}
+                              className="chat-workspace-file-item"
+                            >
+                              <Typography.Text strong>{item.name}</Typography.Text>
+                              <div>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {item.relative_path}
+                                </Typography.Text>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-              </Col>
+                      )}
+                    </Card>
+                  </div>
+                ) : null}
+              </aside>
             )}
           </Row>
         </div>

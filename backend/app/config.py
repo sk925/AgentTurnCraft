@@ -12,9 +12,6 @@ class Settings(BaseSettings):
 
     database_url: str
     upload_dir: str
-    model_api_key: str
-    model_base_url: str
-    model_router_name: str
     redis_url: str = "redis://localhost:6379/0"
     minio_endpoint: str = "http://127.0.0.1:9000"
     minio_access_key: str = "minioadmin"

@@ -1,11 +1,8 @@
 from enum import Enum
 from typing import Any, TypedDict
 from app.chat.base.models.agent_log import AgentLog, AgentLogService
-from app.config import settings
 from app.chat.base.models import Agent
-from langchain_core.callbacks import usage
 from langchain_core.messages import AIMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 
@@ -91,17 +88,8 @@ class WindowState(TypedDict, total=False):
     answer: str # 最终回复
     finish_reason: str # 结束原因
     single_agent_id: int # 单个智能体id
-    interrupt_data: dict[str, Any] # 打断数据
-
-
-def get_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        model=settings.model_router_name,
-        api_key=settings.model_api_key,
-        base_url=settings.model_base_url,
-        temperature=0.2,
-        stream_usage=True
-    )
+    question_data: dict[str, Any] # 打断数据
+    user_input: dict[str, Any] # 用户输入
 
 
 class NoSpeakerError(Exception):

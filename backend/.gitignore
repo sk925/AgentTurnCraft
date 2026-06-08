@@ -1,1 +1,15 @@
 .env
+.venv/
+venv/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Agent 产物与工作空间（运行时生成）
+workspace/
+.uploads/
+Users/

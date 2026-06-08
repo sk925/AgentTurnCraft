@@ -66,7 +66,7 @@ BASE_RULE = """
 - 用户意图不明确，需要向用户收集信息
 - 询问用户问题
 
-### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则：workspace/member_id/session_id/round_id)
+### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则: /workspace/member_id/session_id/round_id)
 {output_dir}
 
 </base_rule>
@@ -125,7 +125,7 @@ class SpeakContext:
     group_members: list[dict]
     speaker_prompt: str
 
-artifact_dir = _BACKEND_ROOT / "workspace" # 产物目录
+artifact_dir = "/workspace" # 产物目录
 
 
 web_search = DuckDuckGoSearchRun()
@@ -173,20 +173,24 @@ def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
     
 
     member_id = user_profile.get("member_id", "") if user_profile else ""
-    output_dir = artifact_dir / f"{member_id}/{ctx.get('session_id', '')}/{ctx.get('rount_id', '')}"
+    output_dir =  f"{artifact_dir}/{member_id}/{ctx.get('session_id', '')}/{ctx.get('round_id', '')}"
 
     scene_description_prompt = SCENE_DESCRIPTION.format(user_message=ctx.get("user_message", ""),
                                           transcript=history_messages_text,
                                           user_profile=user_profile_text,
                                           group_members=_format_group_members(ctx.get("group_members", [])))
 
-    base_rule_prompt = BASE_RULE.format(output_dir=output_dir.resolve().as_posix())
+    base_rule_prompt = BASE_RULE.format(output_dir=output_dir)
 
     deep_agent_inner_prompt = FRAMEQORK_SETTING.format(frame_setting=deep_agent_prompt)
 
     user_custom_prompt = USER_CUSTOM_PROMPT.format(user_custom_prompt=ctx.get("speaker_prompt", ""))
     
     final_prompt = base_rule_prompt + "\n" + deep_agent_inner_prompt + "\n" + user_custom_prompt + "\n" + scene_description_prompt
+
+    print("======final_prompt==============")
+    print(final_prompt)
+    print("======final_prompt==============")
 
     return final_prompt
 
@@ -231,7 +235,7 @@ def clear_speaker_agent_graph_cache() -> None:
 def make_project_backend(_runtime: Any) -> LocalShellBackend:
     return LocalShellBackend(
         root_dir=_BACKEND_ROOT,
-        virtual_mode=False,
+        virtual_mode=True,
         inherit_env=True,
     )
 
@@ -305,8 +309,6 @@ async def stream_messages(
                         "speaker_name": current_speaker.get("name"),
                         "delta": delta,
                         "inner_node": inner_node,
-                        "speaker_id": current_speaker.get("id"),
-                        "speaker_name": current_speaker.get("name"),
                     },
                 )
             elif inner_node == InnerNode.TOOL.value:

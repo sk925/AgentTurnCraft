@@ -176,6 +176,9 @@ def build_window_state_and_config(window_chat_request: WindowChatRequest,db: Ses
         "member_id": member_id,
         "all_agents": all_agents_data,
         "user_profile": {"member_id": member_id, "org_id": window_chat_request.org_id, "member_role": "STUDENT"},
+        # 同 session 复用 checkpoint thread；新轮次 input 须显式覆盖，否则沿用上一轮 interrupt 残留
+        "question_data": {},
+        "user_input": {},
     }
     config = {"configurable": {"thread_id": b.session_id}}
     return window_state, config
@@ -285,7 +288,9 @@ async def execute_group_chat_round(
     try:
         
         async for chunk in window_graph.astream(
-            stream_input, config=config, stream_mode=["messages", "updates", "custom"]
+            stream_input, 
+            config=config, 
+            stream_mode=["messages", "updates", "custom"]
         ):
             if isinstance(chunk, tuple) and len(chunk) == 2:
                 mode, data = chunk
@@ -296,15 +301,26 @@ async def execute_group_chat_round(
 
             if mode == "updates":
                 if data.get("select_agents_node"):
-                    payload = _build_select_agents_payload(data["select_agents_node"])
+                    agents_data = data["select_agents_node"]
+                    payload = _build_select_agents_payload(agents_data)
                     if payload:
                         await publisher.publish(session_id, round_id, payload)
+                    group_members = agents_data.get("group_members", [])
+                    if group_members and len(group_members) == 1:
+                        await publisher.publish(session_id, round_id, {
+                            "event": "select_speaker",
+                            "current_speaker": group_members[0],
+                        })
+                    
                 if data.get("select_speaker_node"):
                     payload = _build_select_speaker_payload(data["select_speaker_node"])
                     if payload:
                         await publisher.publish(session_id, round_id, payload)
                 if data.get("speak_node"):
                     speak_data = data["speak_node"]
+                    print("======speak_node_updates==============")
+                    print(speak_data)
+                    print("======speak_node_updates==============")
                     payload = _build_speaker_payload(speak_data)
                     if payload:
                         await publisher.publish(session_id, round_id, payload)
@@ -319,10 +335,6 @@ async def execute_group_chat_round(
                             },
                         )
                 if isinstance(data, dict) and data.get("__interrupt__"):
-                    print("====================")
-                    print("main_interrupt_data")
-                    print(data.get("__interrupt__")[0].value)
-                    print("====================")
                     await publisher.publish(session_id, round_id, {
                         "event": "main_interrupt",
                         "interrupt_data": data.get("__interrupt__")[0].value,

@@ -5,12 +5,12 @@
   --portal-text: #0f172a;
   --portal-muted: #64748b;
   --portal-surface: #ffffff;
-  --portal-canvas: #f4f7fb;
+  --portal-canvas: #eef2f8;
   --portal-accent: #2563eb;
   --portal-accent-soft: #eff6ff;
   --portal-radius: 14px;
   --portal-chip-border: rgba(15, 23, 42, 0.1);
-  --portal-sider-bg: #fafbfc;
+  --portal-sider-bg: #f5f6f8;
   --portal-sider-border: rgba(15, 23, 42, 0.08);
 }
 
