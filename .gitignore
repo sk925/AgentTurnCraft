@@ -1,0 +1,42 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Python（backend）
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+**/.venv/
+**/venv/
+**/.env
+!**/.env.example
+
+# 后端运行时数据（勿提交）
+backend/workspace/
+backend/.uploads/
+backend/Users/
+
+# Node（前端）
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/*.local
+
+# 构建 / 缓存
+.cache/
+.turbo/
+coverage/
+*.tsbuildinfo
