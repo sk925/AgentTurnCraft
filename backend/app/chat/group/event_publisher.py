@@ -52,9 +52,9 @@ class EventPublisher:
         events_key = _events_key(session_id, round_id)
 
         redis = self.redis
-        await redis.publish(channel, payload)
         await redis.rpush(events_key, payload)
         await redis.expire(events_key, DEFAULT_TTL)
+        await redis.publish(channel, payload)
 
     async def get_round_events(
         self, session_id: str, round_id: str

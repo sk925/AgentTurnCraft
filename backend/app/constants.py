@@ -4,5 +4,6 @@
 `permissions.permission_type`（与库表含义一致）。
 """
 
+# 资源类型：内置=1、自定义=2。
 RESOURCE_TYPE_BUILTIN = 1
 RESOURCE_TYPE_CUSTOM = 2

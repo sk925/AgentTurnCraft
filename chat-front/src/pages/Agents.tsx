@@ -23,6 +23,8 @@ import type { Agent, ChatModelOption, Skill, Group } from '../api';
 
 const { Title, Paragraph, Text } = Typography;
 
+const BUILTIN_TYPE = 1;
+
 function excerpt(text: string | null | undefined, max: number) {
   if (!text) {
     return '—';
@@ -285,6 +287,7 @@ export default function AgentsPage() {
         ) : (
           <Row gutter={[16, 16]}>
             {displayAgents.map((agent) => {
+              const isBuiltin = agent.type === BUILTIN_TYPE;
               const agentSkills = agent.skills ?? [];
               const linkedIds = new Set(agentSkills.map((s) => s.id));
               const addOptions = skillOptions.filter((o) => !linkedIds.has(o.value as number));
@@ -357,7 +360,12 @@ export default function AgentsPage() {
                     {isUserLoggedIn() && (
                       <div className="portal-card__footer">
                         <Space size="small" wrap>
-                          <Button type="link" icon={<EditOutlined />} onClick={() => openEditModal(agent)}>
+                          <Button
+                            type="link"
+                            icon={<EditOutlined />}
+                            disabled={isBuiltin}
+                            onClick={() => openEditModal(agent)}
+                          >
                             编辑
                           </Button>
                           <Popconfirm
@@ -365,8 +373,9 @@ export default function AgentsPage() {
                             onConfirm={() => void handleDelete(agent.id)}
                             okText="确定"
                             cancelText="取消"
+                            disabled={isBuiltin}
                           >
-                            <Button type="link" danger icon={<DeleteOutlined />}>
+                            <Button type="link" danger icon={<DeleteOutlined />} disabled={isBuiltin}>
                               删除
                             </Button>
                           </Popconfirm>

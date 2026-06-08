@@ -312,16 +312,15 @@ async def execute_group_chat_round(
                             "current_speaker": group_members[0],
                         })
                     
+                    
                 if data.get("select_speaker_node"):
                     payload = _build_select_speaker_payload(data["select_speaker_node"])
                     if payload:
                         await publisher.publish(session_id, round_id, payload)
                 if data.get("speak_node"):
                     speak_data = data["speak_node"]
-                    print("======speak_node_updates==============")
-                    print(speak_data)
-                    print("======speak_node_updates==============")
                     payload = _build_speaker_payload(speak_data)
+                    
                     if payload:
                         await publisher.publish(session_id, round_id, payload)
                     if speak_data.get("finished", False):
@@ -331,9 +330,10 @@ async def execute_group_chat_round(
                             {
                                 "event": "speaker_finished",
                                 "answer": speak_data.get("answer", ""),
-                                "finish_reason": speak_data.get("finish_reason", ""),
+                                "finish_reason": speak_data.get("finish_reason", "")
                             },
                         )
+                       
                 if isinstance(data, dict) and data.get("__interrupt__"):
                     await publisher.publish(session_id, round_id, {
                         "event": "main_interrupt",
