@@ -174,21 +174,7 @@ cd admin-manage-front && npm run build
 - 前端对话页：`chat-front/src/pages/ChatWindow.tsx`
 - 实时事件类型：`chat-front/src/api/index.ts` 中 `ChatWindowEvent`
 
-## 推送到 GitHub
 
-仓库已包含根目录 [`.gitignore`](.gitignore)，会忽略密钥、依赖与运行时产物。推送前建议检查：
-
-```bash
-git status
-# 确认无 backend/.env、backend/workspace/、node_modules 等
-```
-
-```bash
-git add README.md .gitignore backend/.env.example
-git commit -m "docs: add README and env example"
-git remote add origin https://github.com/<user>/<repo>.git
-git push -u origin main
-```
 
 ## License
 
