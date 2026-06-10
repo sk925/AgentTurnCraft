@@ -78,7 +78,7 @@ class EventPublisher:
         return await self.redis.get(_active_round_key(session_id))
 
     async def set_round_status(self, session_id: str, round_id: str, status: str) -> None:
-        """设置 round 状态：running / completed / failed"""
+        """设置 round 状态：running / completed / failed / interrupted"""
         key = _status_key(session_id, round_id)
         await self.redis.set(key, status, ex=DEFAULT_TTL)
 

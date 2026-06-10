@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Button,
   Modal,
@@ -13,6 +13,7 @@ import {
   Card,
   Form,
   Input,
+  Tooltip,
 } from 'antd';
 import type { UploadFile } from 'antd';
 import { UploadOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons';
@@ -21,6 +22,60 @@ import { getBackendErrorMessage, goLoginPage, isUserLoggedIn, skillsApi } from '
 import type { Skill } from '../api';
 
 const { Title, Paragraph, Text } = Typography;
+
+const HOVER_DELAY_SEC = 0.5;
+const CLAMP_LINES = 3;
+
+function ClampHoverText({
+  text,
+  placeholder = '—',
+  lines = CLAMP_LINES,
+}: {
+  text: string | null | undefined;
+  placeholder?: string;
+  lines?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const display = text?.trim() ? text.trim() : placeholder;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    setOverflow(el.scrollHeight > el.clientHeight + 1);
+  }, [display, lines]);
+
+  const body = (
+    <div
+      ref={ref}
+      style={{
+        margin: 0,
+        fontSize: 13,
+        color: 'var(--portal-muted)',
+        display: '-webkit-box',
+        WebkitLineClamp: lines,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+        wordBreak: 'break-word',
+        cursor: overflow ? 'help' : undefined,
+      }}
+    >
+      {display}
+    </div>
+  );
+
+  if (!overflow || display === placeholder) {
+    return body;
+  }
+
+  return (
+    <Tooltip title={display} mouseEnterDelay={HOVER_DELAY_SEC} styles={{ root: { maxWidth: 360 } }}>
+      {body}
+    </Tooltip>
+  );
+}
 
 export default function SkillsPage() {
   const navigate = useNavigate();
@@ -153,9 +208,15 @@ export default function SkillsPage() {
                     </div>
                   </div>
                   <div className="portal-card__body">
-                    <Text type="secondary" style={{ fontSize: 13 }}>
-                      {skill.description?.trim() ? skill.description : '暂无描述'}
-                    </Text>
+                    <ClampHoverText text={skill.description} placeholder="暂无描述" />
+                    <div style={{ marginTop: 10 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        包内描述
+                      </Text>
+                      <div style={{ marginTop: 4 }}>
+                        <ClampHoverText text={skill.skill_desc} />
+                      </div>
+                    </div>
                   </div>
                   {isUserLoggedIn() && (
                     <div className="portal-card__footer">

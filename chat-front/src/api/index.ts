@@ -125,7 +125,7 @@ export function clearUserServiceToken(): void {
 }
 
 /** App 侧监听后打开侧栏 `LoginModal`（与具体页面解耦） */
-export const OPEN_LOGIN_MODAL_EVENT = 'free-chat:open-login-modal';
+export const OPEN_LOGIN_MODAL_EVENT = 'agent-turncraft:open-login-modal';
 
 /** 在提示（如 `message.error`）展示后延迟打开登录弹窗 */
 export function requestOpenLoginModal(delayMs = 800): void {
@@ -145,6 +145,8 @@ export interface Skill {
   id: number;
   name: string;
   description: string | null;
+  /** skill.md 中的描述 */
+  skill_desc?: string | null;
   file_path: string | null;
   /** 1 内置（admin 创建） 2 自定义 */
   type?: number;
@@ -342,6 +344,11 @@ export interface ChatSpeakerInterruptEvent {
   tool_id?: string;
 }
 
+export interface ChatMainInterruptEvent {
+  event: 'main_interrupt';
+  interrupt_data?: unknown;
+}
+
 /** 实时：工具调用（与历史 message_type=tool_call 对齐） */
 export interface ChatSpeakerToolCallEvent {
   event: 'speaker_tool_call';
@@ -370,6 +377,7 @@ export type ChatWindowEvent =
   | ChatSpeakerStreamEvent
   | ChatSpeakerModelStreamEvent
   | ChatSpeakerInterruptEvent
+  | ChatMainInterruptEvent
   | ChatSpeakerToolCallEvent
   | ChatSpeakerToolOutEvent;
 

@@ -165,3 +165,14 @@ def download_bytes(
     finally:
         resp.close()
         resp.release_conn()
+
+
+def remove_object(
+    bucket: str,
+    object_name: str,
+    *,
+    client: Minio | None = None,
+) -> None:
+    """从 MinIO 删除对象。"""
+    c = client or get_minio_client()
+    c.remove_object(bucket, object_name)

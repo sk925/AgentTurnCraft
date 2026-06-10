@@ -52,7 +52,7 @@ export default function LoginPage() {
             <MessageOutlined />
           </div>
           <Typography.Title level={1} className="login-page__title">
-            Free Chat
+            AgentTurnCraft
           </Typography.Title>
           <p className="login-page__subtitle">与 AI 轻松对话：单聊、群聊、技能与智能体，一站式工作台。</p>
           <ul className="login-page__highlights">

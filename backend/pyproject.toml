@@ -1,7 +1,7 @@
 [project]
-name = "agent-manage-backend"
+name = "agent-turncraft-backend"
 version = "0.1.0"
-description = "智能体管理后台后端"
+description = "AgentTurnCraft 多智能体轮转编排与协作平台后端"
 requires-python = ">=3.11,<4.0"
 dependencies = [
     "fastapi>=0.109.0",

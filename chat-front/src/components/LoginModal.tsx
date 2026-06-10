@@ -33,7 +33,7 @@ export default function LoginModal({ open, onCancel, onSuccess }: LoginModalProp
     <Modal
       title={
         <Typography.Title level={4} style={{ margin: 0 }}>
-          Free Chat 登录
+          AgentTurnCraft 登录
         </Typography.Title>
       }
       open={open}

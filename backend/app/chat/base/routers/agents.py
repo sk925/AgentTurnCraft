@@ -124,10 +124,30 @@ def add_skill_to_agent(
     skill = get_skill_if_readable(db, skill_id, current_user)
     if not skill:
         raise HTTPException(status_code=404, detail="技能不存在")
+    if not skill.file_path:
+        raise HTTPException(status_code=400, detail="技能包未就绪，请重新上传")
 
-    if skill not in agent.skills:
-        agent.skills.append(skill)
-        db.commit()
+    if skill in agent.skills:
+        return success_response({"linked": True}, message="关联成功")
+
+    from app.chat.base.skill_materializer import ensure_skill_materialized
+    from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
+    from app.chat.single.single_chat import evict_single_chat_agent_cache_for_agent_ids
+
+    ensure_skill_materialized(
+        skill.id,
+        skill.file_path,
+        skill.name,
+        (skill.skill_desc or skill.description or skill.name or "").strip(),
+    )
+
+    agent.skills.append(skill)
+    db.commit()
+    evict_speaker_agent_graph_cache_for_agent_ids([agent_id])
+    evict_single_chat_agent_cache_for_agent_ids([agent_id])
+    from app.chat.base.skill_cache_broadcast import broadcast_agent_skills_changed
+
+    broadcast_agent_skills_changed([agent_id], materialize_skill_ids=[skill_id])
 
     return success_response({"linked": True}, message="关联成功")
 
@@ -151,6 +171,14 @@ def remove_skill_from_agent(
     if skill in agent.skills:
         agent.skills.remove(skill)
         db.commit()
+        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
+        from app.chat.single.single_chat import evict_single_chat_agent_cache_for_agent_ids
+
+        evict_speaker_agent_graph_cache_for_agent_ids([agent_id])
+        evict_single_chat_agent_cache_for_agent_ids([agent_id])
+        from app.chat.base.skill_cache_broadcast import broadcast_agent_skills_changed
+
+        broadcast_agent_skills_changed([agent_id])
 
     return success_response({"unlinked": True}, message="解除关联成功")
 

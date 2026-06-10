@@ -47,7 +47,7 @@ export default function LoginPage() {
             进入控制台
           </Typography.Title>
           <p className="login-card-helper">
-            使用已开通的账户登录。开发环境下由 Vite 将 <code>/api</code> 转发至 free-chat backend（默认{' '}
+            使用已开通的账户登录。开发环境下由 Vite 将 <code>/api</code> 转发至 AgentTurnCraft backend（默认{' '}
             <code>http://localhost:8000</code>）。
           </p>
           <Form layout="vertical" onFinish={(v) => void onFinish(v)} requiredMark="optional">

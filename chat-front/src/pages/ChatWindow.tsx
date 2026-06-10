@@ -85,8 +85,8 @@ import './ChatWindow.css';
 
 const { TextArea } = Input;
 
-const SHOW_TOOL_CALLS_STORAGE_KEY = 'free-chat:show-tool-calls';
-const WORKSPACE_COLLAPSED_STORAGE_KEY = 'free-chat:workspace-collapsed';
+const SHOW_TOOL_CALLS_STORAGE_KEY = 'agent-turncraft:show-tool-calls';
+const WORKSPACE_COLLAPSED_STORAGE_KEY = 'agent-turncraft:workspace-collapsed';
 
 function readShowToolCallsPreference(): boolean {
   try {
@@ -955,6 +955,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           tool_id: event.tool_id,
         });
         setSubmitting(false);
+        break;
+      case 'main_interrupt':
+        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+        setSubmitting(false);
+        liveChatRoundRef.current = false;
         break;
       case 'speaker_finished':
         liveChatRoundRef.current = false;

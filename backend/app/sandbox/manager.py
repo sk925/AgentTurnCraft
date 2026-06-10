@@ -55,7 +55,7 @@ class DockerSandboxManager:
 
     def _container_name(self, session_id: str) -> str:
         safe_sid = "".join(c if c.isalnum() else "-" for c in session_id)[:48]
-        return f"free-chat-s-{safe_sid}"
+        return f"agent-turncraft-s-{safe_sid}"
 
     def host_session_workspace(self, user_id: int | str, session_id: str) -> Path:
         """宿主机会话根目录，对应 API `workspace/{member_id}/{session_id}`。"""

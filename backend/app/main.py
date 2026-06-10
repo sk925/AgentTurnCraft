@@ -60,9 +60,16 @@ async def lifespan(app: FastAPI):
     set_sub_checkpointer(sub_checkpointer)
 
     await init_redis()
+    from app.chat.base.skill_cache_broadcast import (
+        start_skill_cache_invalidation_listener,
+        stop_skill_cache_invalidation_listener,
+    )
+
+    await start_skill_cache_invalidation_listener()
     try:
         yield
     finally:
+        await stop_skill_cache_invalidation_listener()
         await close_redis()
         await sub_checkpointer_cm.__aexit__(None, None, None)
         await checkpointer_cm.__aexit__(None, None, None)

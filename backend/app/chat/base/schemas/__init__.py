@@ -34,6 +34,7 @@ class SkillResponse(SkillBase):
     id: int
     type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
     file_path: Optional[str] = None
+    skill_desc: Optional[str] = None
     create_time: datetime
 
     model_config = ConfigDict(from_attributes=True)

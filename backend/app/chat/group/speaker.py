@@ -250,7 +250,14 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledS
     if current_agent_info is None:
         raise NoSpeakerError(f"发言人{current_speaker.get('id', '')}:{current_speaker.get('name', '')}不存在于群聊成员列表")
 
-    cache_key = (current_agent_info['id'], id(checkpointer))
+    from app.chat.base.skill_materializer import ensure_agent_skills_materialized
+
+    agent_id = current_agent_info["id"]
+    ensure_agent_skills_materialized(agent_id)
+
+    from app.chat.base.skill_materializer import get_agent_skill_ids
+
+    cache_key = (agent_id, id(checkpointer), get_agent_skill_ids(agent_id))
     with _speaker_agent_lock:
         compiled_graph = speaker_agent_map.get(cache_key)
         if compiled_graph is not None:
@@ -273,10 +280,13 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledS
         if compiled_graph is not None:
             speaker_agent_map.move_to_end(cache_key)
             return compiled_graph, current_agent_info['prompt']
+        from app.chat.base.skill_materializer import build_skill_virtual_paths_for_agent
+
+        skill_sources = build_skill_virtual_paths_for_agent(current_agent_info["id"])
         compiled_graph = create_deep_agent(model=llm_model, 
                                    system_prompt="", 
                                    tools=[ask_user_question,FileParser(),web_search],
-                                   skills=[],
+                                   skills=skill_sources or None,
                                    middleware=[format_wrap_prompt],
                                    context_schema=SpeakContext,
                                    checkpointer=checkpointer,

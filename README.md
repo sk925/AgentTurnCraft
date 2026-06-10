@@ -1,6 +1,6 @@
-# Free Chat
+# AgentTurnCraft
 
-基于 **FastAPI + LangGraph + Deep Agents** 的多智能体对话平台，支持单聊、群聊、技能/智能体管理、会话历史、工作空间产物展示与 WebSocket 实时推送。
+多智能体轮转编排与协作平台。基于 **FastAPI + LangGraph + Deep Agents**，支持单聊、群聊、技能/智能体管理、会话历史、工作空间产物展示与 WebSocket 实时推送。
 
 ## 功能概览
 
@@ -37,7 +37,7 @@
 ## 项目结构
 
 ```
-free-chat/
+agent-turncraft/
 ├── backend/                 # FastAPI 后端
 │   ├── app/
 │   │   ├── chat/            # 单聊、群聊、会话、工作空间
@@ -74,7 +74,7 @@ free-chat/
 
 ```bash
 git clone <your-repo-url>
-cd free-chat
+cd agent-turncraft
 ```
 
 ### 2. 后端
@@ -192,4 +192,28 @@ git push -u origin main
 
 ## License
 
-暂未指定开源协议；如需对外开源，请自行补充 LICENSE 文件。
+本项目采用 [MIT License](https://opensource.org/license/mit) 开源。
+
+```
+MIT License
+
+Copyright (c) 2026 AgentTurnCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

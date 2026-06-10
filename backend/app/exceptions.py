@@ -10,6 +10,9 @@ class AppException(Exception):
         self.message = message
         self.code = code
 
+    def __str__(self) -> str:
+        return self.message
+
 
 def _http_detail_to_message(detail: Any) -> str:
     if isinstance(detail, str):

@@ -313,7 +313,7 @@ function AppLayout() {
       <Layout className="portal-shell" hasSider>
       <Sider width={236} breakpoint="lg" collapsedWidth={0} className="portal-sider" theme="light">
         <div className="portal-sider-brand" onClick={() => navigate('/chat')} role="presentation">
-          <span className="portal-sider-brand__name">Free Chat</span>
+          <span className="portal-sider-brand__name">AgentTurnCraft</span>
           <span className="portal-sider-brand__sub">与 AI 轻松对话</span>
         </div>
         <div className="portal-sider-main">

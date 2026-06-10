@@ -363,7 +363,7 @@ async def execute_group_chat_round(
             round_id,
             {
                 "event": "error",
-                "message": str(e),
+                "message": getattr(e, "message", None) or str(e),
             },
         )
         raise
@@ -408,11 +408,13 @@ async def execute_single_chat_round(
         agent_id=single_agent_id,
         file_ids=window_state.get("file_ids") or [],
         attachment_context=window_state.get("attachment_context") or "",
+        resume=window_chat_request.resume,
     )
 
     round_failed = False
+    round_interrupted = False
     try:
-        await chat_with_single_agent(chat_round_info, publisher)
+        round_interrupted = await chat_with_single_agent(chat_round_info, publisher)
     except Exception as e:
         round_failed = True
         logger.exception(
@@ -427,10 +429,15 @@ async def execute_single_chat_round(
         )
         raise
     finally:
-        await publisher.set_round_status(
-            session_id, round_id, "failed" if round_failed else "completed"
-        )
-        await publisher.clear_active_round(session_id)
+        if round_failed:
+            round_status = "failed"
+        elif round_interrupted:
+            round_status = "interrupted"
+        else:
+            round_status = "completed"
+        await publisher.set_round_status(session_id, round_id, round_status)
+        if not round_interrupted:
+            await publisher.clear_active_round(session_id)
 
 
 def execute_chat_round_for_session_type(

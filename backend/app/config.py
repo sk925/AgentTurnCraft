@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     minio_endpoint: str = "http://127.0.0.1:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
-    minio_bucket: str = "free-chat"
+    minio_bucket: str = "agent-turncraft"
     # 签发 / 校验 access_token（app.manage 认证与 app.auth JWT 解析共用）
-    jwt_secret_key: str = "free-chat"
+    jwt_secret_key: str = "agent-turncraft"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
     
