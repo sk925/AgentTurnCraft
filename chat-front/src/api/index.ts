@@ -422,6 +422,8 @@ export const skillsApi = {
       })
       .then((res) => res.data.data);
   },
+  update: (id: number, data: { description: string }) =>
+    api.put<ApiResponse<Skill>>(`/skills/${id}`, data).then((res) => res.data.data),
   delete: (id: number) => api.delete(`/skills/${id}`),
 };
 

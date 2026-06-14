@@ -30,6 +30,10 @@ class SkillCreate(SkillBase):
     file_path: Optional[str] = None
 
 
+class SkillUpdate(BaseModel):
+    description: Optional[str] = None
+
+
 class SkillResponse(SkillBase):
     id: int
     type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')

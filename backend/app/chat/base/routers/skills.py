@@ -16,7 +16,7 @@ from app.config import settings
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.database import get_db
 from app.chat.base.models import Skill
-from app.chat.base.schemas import ApiResponse, SkillResponse, success_response
+from app.chat.base.schemas import ApiResponse, SkillResponse, SkillUpdate, success_response
 from app.query_access import list_skills
 from app.utils.minio_storage import remove_object, upload_bytes
 
@@ -95,6 +95,34 @@ async def upload_skill(
     db.commit()
     db.refresh(skill)
 
+    return success_response(skill)
+
+
+@router.put("/skills/{skill_id}", response_model=ApiResponse[SkillResponse])
+def update_skill(
+    skill_id: int,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    skill_data: SkillUpdate,
+    db: Session = Depends(get_db),
+):
+    """编辑技能自定义描述（仅创建人可改）。"""
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    if skill.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权编辑：仅创建人可修改该技能")
+
+    update_data = skill_data.model_dump(exclude_unset=True)
+    if "description" in update_data:
+        desc = (update_data["description"] or "").strip()
+        if not desc:
+            raise HTTPException(status_code=400, detail="请填写技能描述")
+        if len(desc) > 2000:
+            raise HTTPException(status_code=400, detail="技能描述过长，请控制在 2000 字以内")
+        skill.description = desc
+
+    db.commit()
+    db.refresh(skill)
     return success_response(skill)
 
 

@@ -16,6 +16,7 @@ import LoginModal from './components/LoginModal';
 import { PortalSessionsProvider } from './PortalSessionsContext';
 import SkillsPage from './pages/Skills';
 import AgentsPage from './pages/Agents';
+import AgentDetailPage from './pages/AgentDetail';
 import GroupsPage from './pages/Groups';
 import ChatWindowPage from './pages/ChatWindow';
 import LoginPage from './pages/Login';
@@ -48,6 +49,9 @@ const MENU_PATH_TO_PERMISSION: Record<string, string> = {
 function navSelectedKey(pathname: string): string {
   if (pathname.startsWith('/group-chat')) {
     return '/group-chat';
+  }
+  if (pathname.startsWith('/agents')) {
+    return '/agents';
   }
   if (pathname === '/' || pathname.startsWith('/chat')) {
     return '/chat';
@@ -469,6 +473,7 @@ function AppLayout() {
           <Routes>
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/agents" element={<AgentsPage />} />
+            <Route path="/agents/:id" element={<AgentDetailPage />} />
             <Route path="/groups" element={<GroupsPage />} />
             <Route path="/chat" element={<ChatWindowPage sessionType="chat" />} />
             <Route path="/group-chat" element={<ChatWindowPage sessionType="group" />} />

@@ -16,28 +16,45 @@ import {
   Tooltip,
 } from 'antd';
 import type { UploadFile } from 'antd';
-import { UploadOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons';
+import {
+  UploadOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  ThunderboltOutlined,
+  ClockCircleOutlined,
+} from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getBackendErrorMessage, goLoginPage, isUserLoggedIn, skillsApi } from '../api';
 import type { Skill } from '../api';
 
-const { Title, Paragraph, Text } = Typography;
+const { Title, Paragraph } = Typography;
 
 const HOVER_DELAY_SEC = 0.5;
-const CLAMP_LINES = 3;
+const CLAMP_LINES = 2;
+const BUILTIN_TYPE = 1;
+
+function formatSkillDate(iso: string) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' });
+  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time}`;
+}
 
 function ClampHoverText({
   text,
   placeholder = '—',
   lines = CLAMP_LINES,
+  variant = 'primary',
 }: {
   text: string | null | undefined;
   placeholder?: string;
   lines?: number;
+  variant?: 'primary' | 'secondary';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState(false);
-  const display = text?.trim() ? text.trim() : placeholder;
+  const isEmpty = !text?.trim();
+  const display = isEmpty ? placeholder : text!.trim();
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -49,24 +66,19 @@ function ClampHoverText({
 
   const body = (
     <div
-      ref={ref}
-      style={{
-        margin: 0,
-        fontSize: 13,
-        color: 'var(--portal-muted)',
-        display: '-webkit-box',
-        WebkitLineClamp: lines,
-        WebkitBoxOrient: 'vertical',
-        overflow: 'hidden',
-        wordBreak: 'break-word',
-        cursor: overflow ? 'help' : undefined,
-      }}
+      className={`portal-skill-card__content portal-skill-card__content--${variant}`}
     >
-      {display}
+      <p
+        ref={ref}
+        className={`portal-skill-card__clamp${isEmpty ? ' is-empty' : ''}${overflow ? ' is-help' : ''}`}
+        style={{ WebkitLineClamp: lines }}
+      >
+        {display}
+      </p>
     </div>
   );
 
-  if (!overflow || display === placeholder) {
+  if (!overflow || isEmpty) {
     return body;
   }
 
@@ -74,6 +86,105 @@ function ClampHoverText({
     <Tooltip title={display} mouseEnterDelay={HOVER_DELAY_SEC} styles={{ root: { maxWidth: 360 } }}>
       {body}
     </Tooltip>
+  );
+}
+
+function SkillCard({
+  skill,
+  onEdit,
+  onDelete,
+}: {
+  skill: Skill;
+  onEdit: (skill: Skill) => void;
+  onDelete: (id: number) => void;
+}) {
+  const isBuiltin = skill.type === BUILTIN_TYPE;
+  const loggedIn = isUserLoggedIn();
+  const canManage = loggedIn && !isBuiltin;
+
+  return (
+    <Card className="portal-card portal-skill-card" hoverable variant="borderless" style={{ height: '100%' }}>
+      <div className="portal-card__head">
+        <div className="portal-card__avatar" aria-hidden>
+          <ThunderboltOutlined />
+        </div>
+        <div className="portal-skill-card__head-main">
+          <div className="portal-skill-card__title-row">
+            <h3 className="portal-card__title">{skill.name}</h3>
+            <span
+              className={`portal-skill-card__badge ${
+                isBuiltin ? 'portal-skill-card__badge--builtin' : 'portal-skill-card__badge--custom'
+              }`}
+            >
+              {isBuiltin ? '内置' : '自定义'}
+            </span>
+          </div>
+          <div className="portal-skill-card__meta">
+            <ClockCircleOutlined style={{ fontSize: 10, opacity: 0.7 }} />
+            <span>{formatSkillDate(skill.create_time)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="portal-card__body">
+        <div className="portal-skill-card__sections">
+          <section>
+            <div className="portal-skill-card__section-head">
+              <span className="portal-skill-card__label">
+                <span className="portal-skill-card__label-mark portal-skill-card__label-mark--primary" />
+                自定义描述
+              </span>
+              {loggedIn && (
+                <Tooltip title={isBuiltin ? '内置技能不可编辑' : '编辑描述'}>
+                  <button
+                    type="button"
+                    className="portal-skill-card__inline-edit"
+                    disabled={!canManage}
+                    aria-label="编辑自定义描述"
+                    onClick={() => onEdit(skill)}
+                  >
+                    <EditOutlined style={{ fontSize: 11 }} />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+            <ClampHoverText text={skill.description} placeholder="暂无描述" variant="primary" />
+          </section>
+
+          <section>
+            <div className="portal-skill-card__section-head">
+              <span className="portal-skill-card__label">
+                <span className="portal-skill-card__label-mark portal-skill-card__label-mark--secondary" />
+                包内描述
+              </span>
+            </div>
+            <ClampHoverText text={skill.skill_desc} lines={1} variant="secondary" />
+          </section>
+        </div>
+      </div>
+
+      {loggedIn && (
+        <div className="portal-card__footer">
+          <div className="portal-skill-card__actions">
+            <Popconfirm
+              title="确定删除该技能吗？"
+              onConfirm={() => void onDelete(skill.id)}
+              okText="确定"
+              cancelText="取消"
+              disabled={!canManage}
+            >
+              <Button
+                className="portal-skill-card__action-btn portal-skill-card__action-btn--delete"
+                icon={<DeleteOutlined />}
+                disabled={!canManage}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -85,8 +196,12 @@ export default function SkillsPage() {
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const [uploadForm] = Form.useForm<{ description: string }>();
+  const [editForm] = Form.useForm<{ description: string }>();
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
 
   const fetchSkills = async () => {
     setLoading(true);
@@ -152,6 +267,52 @@ export default function SkillsPage() {
     }
   };
 
+  const openEditModal = (skill: Skill) => {
+    if (!isUserLoggedIn()) {
+      message.warning('请先登录后再编辑技能');
+      goLoginPage(navigate, { pathname: location.pathname, search: location.search });
+      return;
+    }
+    if (skill.type === BUILTIN_TYPE) {
+      return;
+    }
+    setEditingSkill(skill);
+    editForm.setFieldsValue({ description: skill.description ?? '' });
+    setEditModalVisible(true);
+  };
+
+  const closeEditModal = () => {
+    setEditModalVisible(false);
+    setEditingSkill(null);
+    editForm.resetFields();
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingSkill) {
+      return;
+    }
+    if (!isUserLoggedIn()) {
+      message.warning('请先登录后再编辑技能');
+      goLoginPage(navigate, { pathname: location.pathname, search: location.search });
+      return;
+    }
+    try {
+      const { description } = await editForm.validateFields();
+      setEditSubmitting(true);
+      await skillsApi.update(editingSkill.id, { description: description.trim() });
+      message.success('保存成功');
+      closeEditModal();
+      void fetchSkills();
+    } catch (error: unknown) {
+      if ((error as { errorFields?: unknown })?.errorFields) {
+        return;
+      }
+      message.error(getBackendErrorMessage(error, '保存失败'));
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
   const handleDelete = async (id: number) => {
     if (!isUserLoggedIn()) {
       message.warning('请先登录后再删除技能');
@@ -192,52 +353,46 @@ export default function SkillsPage() {
         {skills.length === 0 ? (
           <Empty description="暂无技能，上传符合规范的 .zip 技能包" />
         ) : (
-          <Row gutter={[16, 16]}>
+          <Row gutter={[14, 14]}>
             {skills.map((skill) => (
-              <Col xs={24} sm={12} lg={8} xl={6} key={skill.id}>
-                <Card className="portal-card portal-skill-card" hoverable variant="borderless" style={{ height: '100%' }}>
-                  <div className="portal-card__head">
-                    <div className="portal-card__avatar" aria-hidden>
-                      <FileTextOutlined />
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <h3 className="portal-card__title">{skill.name}</h3>
-                      <div className="portal-card__meta">
-                        创建于 {new Date(skill.create_time).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="portal-card__body">
-                    <ClampHoverText text={skill.description} placeholder="暂无描述" />
-                    <div style={{ marginTop: 10 }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        包内描述
-                      </Text>
-                      <div style={{ marginTop: 4 }}>
-                        <ClampHoverText text={skill.skill_desc} />
-                      </div>
-                    </div>
-                  </div>
-                  {isUserLoggedIn() && (
-                    <div className="portal-card__footer">
-                      <Popconfirm
-                        title="确定删除该技能吗？"
-                        onConfirm={() => void handleDelete(skill.id)}
-                        okText="确定"
-                        cancelText="取消"
-                      >
-                        <Button danger icon={<DeleteOutlined />}>
-                          删除
-                        </Button>
-                      </Popconfirm>
-                    </div>
-                  )}
-                </Card>
+              <Col xs={24} sm={12} md={8} lg={6} xl={4} key={skill.id}>
+                <SkillCard skill={skill} onEdit={openEditModal} onDelete={handleDelete} />
               </Col>
             ))}
           </Row>
         )}
       </Spin>
+
+      <Modal
+        title={editingSkill ? `编辑技能：${editingSkill.name}` : '编辑技能'}
+        open={editModalVisible}
+        onCancel={closeEditModal}
+        destroyOnClose
+        width={520}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={editSubmitting}
+        onOk={() => void handleEditSubmit()}
+      >
+        <Form form={editForm} layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item
+            name="description"
+            label="自定义描述"
+            rules={[
+              { required: true, message: '请填写技能描述' },
+              { min: 2, message: '至少输入 2 个字' },
+              { max: 2000, message: '描述过长' },
+            ]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder="说明该技能的用途、适用场景等，将展示在技能卡片上"
+              showCount
+              maxLength={2000}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="上传技能"

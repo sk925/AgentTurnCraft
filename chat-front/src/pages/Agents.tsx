@@ -1,36 +1,174 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
-  Card,
-  Modal,
-  Form,
-  Input,
-  Popconfirm,
-  Tag,
-  Select,
   message,
+  Popconfirm,
   Row,
   Col,
   Typography,
   Empty,
   Spin,
-  Space,
+  Select,
+  Tooltip,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, RobotOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, RobotOutlined, ClockCircleOutlined, ApiOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { agentsApi, getBackendErrorMessage, goLoginPage, groupsApi, isUserLoggedIn, modelManageApi, skillsApi } from '../api';
-import type { Agent, ChatModelOption, Skill, Group } from '../api';
+import { agentsApi, getBackendErrorMessage, goLoginPage, groupsApi, isUserLoggedIn, modelManageApi } from '../api';
+import type { Agent, ChatModelOption, Group } from '../api';
 
 const { Title, Paragraph, Text } = Typography;
 
 const BUILTIN_TYPE = 1;
+const DESC_EXCERPT_MAX = 48;
+const HOVER_DELAY_SEC = 0.5;
+
+function formatAgentDate(iso: string) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' });
+  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time}`;
+}
 
 function excerpt(text: string | null | undefined, max: number) {
   if (!text) {
-    return '—';
+    return '暂无描述';
   }
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length <= max ? t : `${t.slice(0, max)}…`;
+}
+
+function AgentCardDesc({ description }: { description: string | null | undefined }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const isEmpty = !description?.trim();
+  const fullText = isEmpty ? '暂无描述' : description!.trim();
+  const display = excerpt(description, DESC_EXCERPT_MAX);
+  const truncatedByLength = !isEmpty && fullText.replace(/\s+/g, ' ').trim().length > DESC_EXCERPT_MAX;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    setOverflow(el.scrollHeight > el.clientHeight + 1);
+  }, [display]);
+
+  const showTooltip = !isEmpty && (truncatedByLength || overflow);
+
+  const body = (
+    <p
+      ref={ref}
+      className={`portal-agent-card__desc${showTooltip ? ' is-help' : ''}`}
+    >
+      {display}
+    </p>
+  );
+
+  if (!showTooltip) {
+    return body;
+  }
+
+  return (
+    <Tooltip
+      title={<span className="portal-agent-card__desc-tooltip">{fullText}</span>}
+      mouseEnterDelay={HOVER_DELAY_SEC}
+      styles={{ root: { maxWidth: 360 } }}
+    >
+      {body}
+    </Tooltip>
+  );
+}
+
+function AgentCard({
+  agent,
+  modelLabel,
+  onOpen,
+  onDelete,
+  showDelete,
+}: {
+  agent: Agent;
+  modelLabel: string;
+  onOpen: (id: number) => void;
+  onDelete: (id: number) => void;
+  showDelete: boolean;
+}) {
+  const isBuiltin = agent.type === BUILTIN_TYPE;
+  const canDelete = showDelete && !isBuiltin;
+
+  return (
+    <div className="portal-agent-card-wrap">
+      <div className="portal-agent-card__main" onClick={() => onOpen(agent.id)} role="button" tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpen(agent.id);
+          }
+        }}
+      >
+        <div className="portal-agent-card__head">
+          <div className="portal-agent-card__avatar" aria-hidden>
+            <RobotOutlined />
+          </div>
+          <div className="portal-agent-card__head-main">
+            <div className="portal-agent-card__title-row">
+              <h3 className="portal-agent-card__title">{agent.name}</h3>
+              <span
+                className={`portal-agent-card__badge ${
+                  isBuiltin ? 'portal-agent-card__badge--builtin' : 'portal-agent-card__badge--custom'
+                }`}
+              >
+                {isBuiltin ? '内置' : '自定义'}
+              </span>
+            </div>
+            <div className="portal-agent-card__meta">
+              <ClockCircleOutlined />
+              <span>{formatAgentDate(agent.create_time)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="portal-agent-card__body">
+          <div className="portal-agent-card__row">
+            <span className="portal-agent-card__label">描述</span>
+            <AgentCardDesc description={agent.description} />
+          </div>
+          <div className="portal-agent-card__row portal-agent-card__row--model">
+            <span className="portal-agent-card__label">
+              <ApiOutlined />
+              模型
+            </span>
+            <span className="portal-agent-card__model">{modelLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      {showDelete && (
+        <div
+          className="portal-agent-card__footer"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Popconfirm
+            title="确定删除该智能体吗？"
+            onConfirm={() => void onDelete(agent.id)}
+            okText="确定"
+            cancelText="取消"
+            disabled={!canDelete}
+          >
+            <Button
+              className="portal-agent-card__delete"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              disabled={!canDelete}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AgentsPage() {
@@ -39,12 +177,8 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [filterGroupId, setFilterGroupId] = useState<number | undefined>(undefined);
-  const [form] = Form.useForm();
 
   const fetchAgents = async () => {
     setLoading(true);
@@ -67,19 +201,7 @@ export default function AgentsPage() {
     }
   };
 
-  const fetchSkills = async () => {
-    try {
-      const data = await skillsApi.getAll();
-      setSkills(data);
-    } catch (error) {
-      message.error(getBackendErrorMessage(error, '获取技能列表失败'));
-    }
-  };
-
   const fetchChatModels = async () => {
-    if (!isUserLoggedIn()) {
-      return;
-    }
     try {
       const data = await modelManageApi.listChatModels();
       setChatModels(data);
@@ -91,10 +213,7 @@ export default function AgentsPage() {
   useEffect(() => {
     void fetchAgents();
     void fetchGroups();
-    void fetchSkills();
-    if (isUserLoggedIn()) {
-      void fetchChatModels();
-    }
+    void fetchChatModels();
   }, []);
 
   const agentIdsInFilterGroup = useMemo(() => {
@@ -124,36 +243,28 @@ export default function AgentsPage() {
     return false;
   };
 
-  const handleSubmit = async (values: {
-    name: string;
-    description?: string;
-    prompt?: string;
-    chat_model_id?: string | null;
-  }) => {
+  const openCreatePage = () => {
     if (!requireLogin()) {
       return;
     }
-    const payload = {
-      name: values.name,
-      description: values.description,
-      prompt: values.prompt,
-      chat_model_id: values.chat_model_id ?? null,
-    };
-    try {
-      if (editingAgent) {
-        await agentsApi.update(editingAgent.id, payload);
-        message.success('编辑成功');
-      } else {
-        await agentsApi.create(payload);
-        message.success('添加成功');
-      }
-      setModalVisible(false);
-      setEditingAgent(null);
-      form.resetFields();
-      void fetchAgents();
-    } catch (error) {
-      message.error(getBackendErrorMessage(error, editingAgent ? '编辑失败' : '添加失败'));
+    navigate('/agents/new');
+  };
+
+  const groupFilterOptions = useMemo(
+    () => groups.map((g) => ({ label: g.name, value: g.id })),
+    [groups],
+  );
+
+  const chatModelLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of chatModels) {
+      map.set(m.id, m.provider_name ? `${m.name}（${m.provider_name}）` : m.name);
     }
+    return map;
+  }, [chatModels]);
+
+  const openAgentDetail = (id: number) => {
+    navigate(`/agents/${id}`);
   };
 
   const handleDelete = async (id: number) => {
@@ -169,89 +280,12 @@ export default function AgentsPage() {
     }
   };
 
-  const handleAddSkill = async (agentId: number, skillId: number) => {
-    if (!requireLogin()) {
-      return;
-    }
-    try {
-      await agentsApi.addSkill(agentId, skillId);
-      message.success('关联成功');
-      void fetchAgents();
-    } catch (error) {
-      message.error(getBackendErrorMessage(error, '关联失败'));
-    }
-  };
-
-  const handleRemoveSkill = async (agentId: number, skillId: number) => {
-    if (!requireLogin()) {
-      return;
-    }
-    try {
-      await agentsApi.removeSkill(agentId, skillId);
-      message.success('已解除关联');
-      void fetchAgents();
-    } catch (error) {
-      message.error(getBackendErrorMessage(error, '解除关联失败'));
-    }
-  };
-
-  const openCreateModal = () => {
-    if (!requireLogin()) {
-      return;
-    }
-    setEditingAgent(null);
-    form.resetFields();
-    void fetchChatModels();
-    setModalVisible(true);
-  };
-
-  const openEditModal = (agent: Agent) => {
-    if (!requireLogin()) {
-      return;
-    }
-    setEditingAgent(agent);
-    void fetchChatModels();
-    form.setFieldsValue({
-      name: agent.name,
-      description: agent.description ?? undefined,
-      prompt: agent.prompt ?? undefined,
-      chat_model_id: agent.chat_model_id ?? undefined,
-    });
-    setModalVisible(true);
-  };
-
-  const skillOptions = useMemo(() => {
-    return skills.map((s) => ({ label: s.name, value: s.id }));
-  }, [skills]);
-
-  const groupFilterOptions = useMemo(
-    () => groups.map((g) => ({ label: g.name, value: g.id })),
-    [groups],
-  );
-
-  const chatModelSelectOptions = useMemo(
-    () =>
-      chatModels.map((m) => ({
-        label: m.provider_name ? `${m.name}（${m.provider_name}）` : m.name,
-        value: m.id,
-      })),
-    [chatModels],
-  );
-
-  const chatModelLabelById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of chatModels) {
-      map.set(m.id, m.provider_name ? `${m.name}（${m.provider_name}）` : m.name);
-    }
-    return map;
-  }, [chatModels]);
-
   return (
     <div>
       <div className="portal-page-hero">
         <Title level={2}>智能体</Title>
         <Paragraph type="secondary" style={{ maxWidth: 720, marginBottom: 0 }}>
-          创建不同人设与能力的对话角色，并为其关联技能。面向访客时，建议用简短、好记的名称与描述。
+          创建不同人设与能力的对话角色，并为其关联技能。点击卡片进入详情页配置。
         </Paragraph>
         <div className="portal-toolbar">
           <div className="portal-toolbar-left">
@@ -269,7 +303,7 @@ export default function AgentsPage() {
           </div>
           <div className="portal-toolbar-actions">
             {isUserLoggedIn() && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePage}>
                 添加智能体
               </Button>
             )}
@@ -285,144 +319,25 @@ export default function AgentsPage() {
             }
           />
         ) : (
-          <Row gutter={[16, 16]}>
-            {displayAgents.map((agent) => {
-              const isBuiltin = agent.type === BUILTIN_TYPE;
-              const agentSkills = agent.skills ?? [];
-              const linkedIds = new Set(agentSkills.map((s) => s.id));
-              const addOptions = skillOptions.filter((o) => !linkedIds.has(o.value as number));
-
-              return (
-                <Col xs={24} sm={12} lg={8} xl={6} key={agent.id}>
-                  <Card className="portal-card" hoverable variant="borderless" style={{ height: '100%' }}>
-                    <div className="portal-card__head">
-                      <div className="portal-card__avatar" aria-hidden>
-                        <RobotOutlined />
-                      </div>
-                      <div style={{ minWidth: 0 }}>
-                        <h3 className="portal-card__title">{agent.name}</h3>
-                        <div className="portal-card__meta">
-                          创建于 {new Date(agent.create_time).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="portal-card__body">
-                      <Text type="secondary" style={{ fontSize: 13 }}>
-                        {excerpt(agent.description, 120)}
-                      </Text>
-                      <div style={{ marginTop: 10 }}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          对话模型
-                        </Text>
-                        <Paragraph style={{ marginBottom: 0, marginTop: 4, fontSize: 13 }}>
-                          {agent.chat_model_id
-                            ? chatModelLabelById.get(agent.chat_model_id) ?? `ID ${agent.chat_model_id}`
-                            : '—'}
-                        </Paragraph>
-                      </div>
-                      <div style={{ marginTop: 10 }}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          提示词摘要
-                        </Text>
-                        <Paragraph
-                          style={{ marginBottom: 0, marginTop: 4, fontSize: 13 }}
-                          ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
-                        >
-                          {agent.prompt || '—'}
-                        </Paragraph>
-                      </div>
-                      <div style={{ marginTop: 12 }} className="portal-card-tags">
-                        {agentSkills.map((skill) => (
-                          <Tag
-                            key={skill.id}
-                            closable={isUserLoggedIn()}
-                            onClose={() => handleRemoveSkill(agent.id, skill.id)}
-                            color="processing"
-                          >
-                            {skill.name}
-                          </Tag>
-                        ))}
-                      </div>
-                      {isUserLoggedIn() && addOptions.length > 0 && (
-                        <Select
-                          style={{ width: '100%', marginTop: 10 }}
-                          placeholder="添加技能"
-                          value={undefined}
-                          options={addOptions}
-                          onChange={(skillId) => {
-                            if (typeof skillId === 'number') {
-                              void handleAddSkill(agent.id, skillId);
-                            }
-                          }}
-                        />
-                      )}
-                    </div>
-                    {isUserLoggedIn() && (
-                      <div className="portal-card__footer">
-                        <Space size="small" wrap>
-                          <Button
-                            type="link"
-                            icon={<EditOutlined />}
-                            disabled={isBuiltin}
-                            onClick={() => openEditModal(agent)}
-                          >
-                            编辑
-                          </Button>
-                          <Popconfirm
-                            title="确定删除该智能体吗？"
-                            onConfirm={() => void handleDelete(agent.id)}
-                            okText="确定"
-                            cancelText="取消"
-                            disabled={isBuiltin}
-                          >
-                            <Button type="link" danger icon={<DeleteOutlined />} disabled={isBuiltin}>
-                              删除
-                            </Button>
-                          </Popconfirm>
-                        </Space>
-                      </div>
-                    )}
-                  </Card>
-                </Col>
-              );
-            })}
+          <Row gutter={[16, 16]} className="portal-agents-grid">
+            {displayAgents.map((agent) => (
+              <Col xs={12} sm={12} md={8} lg={6} xl={4} key={agent.id}>
+                <AgentCard
+                  agent={agent}
+                  modelLabel={
+                    agent.chat_model_id
+                      ? chatModelLabelById.get(agent.chat_model_id) ?? `ID ${agent.chat_model_id}`
+                      : '未配置'
+                  }
+                  onOpen={openAgentDetail}
+                  onDelete={handleDelete}
+                  showDelete={isUserLoggedIn()}
+                />
+              </Col>
+            ))}
           </Row>
         )}
       </Spin>
-
-      <Modal
-        title={editingAgent ? '编辑智能体' : '添加智能体'}
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          setEditingAgent(null);
-          form.resetFields();
-        }}
-        onOk={() => form.submit()}
-        width={520}
-        destroyOnClose
-      >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入智能体名称' }]}>
-            <Input placeholder="例如：职场顾问小王" />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} placeholder="一句话介绍角色定位，访客会先看到这段" />
-          </Form.Item>
-          <Form.Item name="prompt" label="提示词">
-            <Input.TextArea rows={6} placeholder="系统提示词，定义语气、知识边界与行为" />
-          </Form.Item>
-          <Form.Item name="chat_model_id" label="对话模型">
-            <Select
-              allowClear
-              placeholder="选择默认对话模型（可选，须先在模型管理中配置）"
-              options={chatModelSelectOptions}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 }

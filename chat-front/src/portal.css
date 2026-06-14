@@ -550,11 +550,1497 @@
 }
 
 .portal-skill-card .portal-card__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 16px;
   background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
   color: #059669;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.12);
+}
+
+.portal-skill-card.ant-card .ant-card-body {
+  padding: 14px;
+}
+
+/* —— 技能卡片增强 —— */
+.portal-skill-card.ant-card {
+  position: relative;
+  border-radius: 12px;
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.22s ease,
+    border-color 0.22s ease;
+}
+
+.portal-skill-card.ant-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #059669 0%, #34d399 55%, #6ee7b7 100%);
+  border-radius: 12px 12px 0 0;
+  opacity: 0.9;
+  z-index: 1;
+}
+
+.portal-skill-card.ant-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(5, 150, 105, 0.11);
+  border-color: rgba(5, 150, 105, 0.16);
+}
+
+.portal-skill-card .portal-card__head {
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.portal-skill-card .portal-card__title {
+  font-size: 0.9rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+  padding-right: 2px;
+}
+
+.portal-skill-card__head-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portal-skill-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.portal-skill-card__badge {
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
+}
+
+.portal-skill-card__badge--builtin {
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid rgba(3, 105, 161, 0.12);
+}
+
+.portal-skill-card__badge--custom {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid rgba(4, 120, 87, 0.14);
+}
+
+.portal-skill-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--portal-muted);
+}
+
+.portal-skill-card__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-skill-card__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.portal-skill-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.portal-skill-card__label-mark {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.portal-skill-card__label-mark--primary {
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+}
+
+.portal-skill-card__label-mark--secondary {
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.14);
+}
+
+.portal-skill-card__inline-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.portal-skill-card__inline-edit:hover:not(:disabled) {
+  background: rgba(5, 150, 105, 0.1);
+  color: #059669;
+  transform: scale(1.05);
+}
+
+.portal-skill-card__inline-edit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.portal-skill-card__content {
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.portal-skill-card__content--primary {
+  background: linear-gradient(145deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid rgba(5, 150, 105, 0.14);
+  color: #134e4a;
+}
+
+.portal-skill-card__content--secondary {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  color: var(--portal-muted);
+  font-size: 11.5px;
+}
+
+.portal-skill-card__clamp {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.portal-skill-card__clamp.is-empty {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.portal-skill-card__clamp.is-help {
+  cursor: help;
+}
+
+.portal-skill-card .portal-card__footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  justify-content: flex-end;
+}
+
+.portal-skill-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.portal-skill-card__action-btn.ant-btn {
+  height: 28px;
+  padding-inline: 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.portal-skill-card__action-btn--delete.ant-btn {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+}
+
+.portal-skill-card__action-btn--delete.ant-btn:hover:not(:disabled) {
+  color: #991b1b !important;
+  background: #fee2e2 !important;
+  border-color: rgba(185, 28, 28, 0.2) !important;
+}
+
+.portal-skill-card__action-btn.ant-btn:disabled {
+  opacity: 0.4;
 }
 
 .portal-group-card .portal-card__avatar {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
   color: #b45309;
+}
+
+/* —— 智能体列表卡片 —— */
+.portal-agents-grid .ant-col {
+  display: flex;
+}
+
+.portal-agent-card-wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  background: var(--portal-surface);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  position: relative;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.portal-agent-card-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #2563eb 0%, #60a5fa 55%, #93c5fd 100%);
+  opacity: 0.9;
+  z-index: 1;
+}
+
+.portal-agent-card-wrap:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.14);
+}
+
+.portal-agent-card__main {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 12px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.portal-agent-card__main:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: -2px;
+}
+
+.portal-agent-card__head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.portal-agent-card__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--portal-accent);
+  background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+
+.portal-agent-card__head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-agent-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.portal-agent-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--portal-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.portal-agent-card__badge {
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.portal-agent-card__badge--builtin {
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid rgba(3, 105, 161, 0.12);
+}
+
+.portal-agent-card__badge--custom {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid rgba(29, 78, 216, 0.12);
+}
+
+.portal-agent-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--portal-muted);
+}
+
+.portal-agent-card__meta .anticon {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.portal-agent-card__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.portal-agent-card__row {
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.04);
+  min-height: 0;
+}
+
+.portal-agent-card__row:first-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-agent-card__row--model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 4px;
+  flex-shrink: 0;
+}
+
+.portal-agent-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 3px;
+}
+
+.portal-agent-card__row--model .portal-agent-card__label {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.portal-agent-card__label .anticon {
+  font-size: 9px;
+}
+
+.portal-agent-card__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #475569;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.portal-agent-card__desc.is-help {
+  cursor: help;
+}
+
+.portal-agent-card__desc-tooltip {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.portal-agent-card__model {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #1d4ed8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.portal-agent-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fafbfc;
+}
+
+.portal-agent-card__delete.ant-btn {
+  height: 26px;
+  padding-inline: 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+  box-shadow: none;
+}
+
+.portal-agent-card__delete.ant-btn:hover:not(:disabled) {
+  color: #991b1b !important;
+  background: #fee2e2 !important;
+  border-color: rgba(185, 28, 28, 0.2) !important;
+}
+
+.portal-agent-card__delete.ant-btn:disabled {
+  opacity: 0.4;
+}
+
+/* —— 智能体详情页 —— */
+.portal-agent-detail {
+  width: 100%;
+  max-width: none;
+  min-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  --agent-detail-accent: #2563eb;
+  --agent-detail-accent-hover: #1d4ed8;
+  --agent-detail-accent-soft: #eff6ff;
+  --agent-detail-accent-muted: #dbeafe;
+  --agent-detail-surface: #ffffff;
+  --agent-detail-subtle: #f8fafc;
+  --agent-detail-border: rgba(15, 23, 42, 0.07);
+}
+
+.portal-agent-detail__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.portal-agent-detail__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--portal-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.portal-agent-detail__back:hover {
+  color: var(--portal-accent);
+  background: #fff;
+}
+
+.portal-agent-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+.portal-agent-detail__actions--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.portal-agent-detail__actions .ant-btn {
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.portal-agent-detail__actions .ant-btn-primary:not(:disabled) {
+  background: var(--agent-detail-accent);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+}
+
+.portal-agent-detail__actions .ant-btn-primary:not(:disabled):hover {
+  background: var(--agent-detail-accent-hover) !important;
+}
+
+.portal-agent-detail__actions .ant-btn-default:disabled,
+.portal-agent-detail__actions .ant-btn-primary:disabled {
+  opacity: 0.5;
+}
+
+.portal-agent-detail .ant-spin-nested-loading,
+.portal-agent-detail .ant-spin-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-agent-detail__layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.portal-agent-detail__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+  border-radius: 14px;
+  background: var(--portal-surface);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.portal-agent-detail__sidebar-head {
+  padding: 20px 18px 16px;
+  background: linear-gradient(160deg, var(--agent-detail-accent-soft) 0%, var(--agent-detail-accent-muted) 55%, #e0e7ff 100%);
+  border-bottom: 1px solid var(--agent-detail-border);
+  color: var(--portal-text);
+}
+
+.portal-agent-detail__sidebar-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--agent-detail-accent);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+  margin-bottom: 12px;
+}
+
+.portal-agent-detail__sidebar-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--portal-text);
+  word-break: break-word;
+}
+
+.portal-agent-detail__badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.portal-agent-detail__badge--builtin {
+  color: #0369a1;
+  background: #e0f2fe;
+}
+
+.portal-agent-detail__badge--custom {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.portal-agent-detail__sidebar-desc {
+  margin: 0;
+  padding: 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.portal-agent-detail__meta-list {
+  margin: 0;
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-agent-detail__meta-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--agent-detail-border);
+  font-size: 12px;
+}
+
+.portal-agent-detail__meta-row:last-child {
+  border-bottom: none;
+}
+
+.portal-agent-detail__meta-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.portal-agent-detail__meta-label .anticon {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.portal-agent-detail__meta-value {
+  margin: 0;
+  color: var(--portal-text);
+  text-align: right;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.portal-agent-detail__edit-btn.ant-btn {
+  margin: auto 14px 14px;
+  height: 36px;
+  border-radius: 9px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid rgba(29, 78, 216, 0.14);
+  box-shadow: none;
+}
+
+.portal-agent-detail__edit-btn.ant-btn:hover:not(:disabled) {
+  color: #1e40af !important;
+  background: #dbeafe !important;
+  border-color: rgba(29, 78, 216, 0.22) !important;
+}
+
+.portal-agent-detail__main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.portal-agent-detail__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 4px 0;
+  margin-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--agent-detail-subtle);
+  border: 1px solid var(--agent-detail-border);
+  border-bottom: none;
+}
+
+.portal-agent-detail__tab {
+  flex: 1;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 14px 13px;
+  border: none;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--portal-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.portal-agent-detail__tab .anticon {
+  font-size: 14px;
+  opacity: 0.75;
+  transition: opacity 0.18s ease;
+}
+
+.portal-agent-detail__tab:hover:not(.is-active) {
+  color: var(--portal-text);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.portal-agent-detail__tab.is-active {
+  color: var(--agent-detail-accent-hover);
+  background: var(--agent-detail-surface);
+  box-shadow: 0 -1px 0 var(--agent-detail-border);
+}
+
+.portal-agent-detail__tab.is-active .anticon {
+  opacity: 1;
+  color: var(--agent-detail-accent);
+}
+
+.portal-agent-detail__tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(90deg, var(--agent-detail-accent) 0%, #60a5fa 100%);
+}
+
+.portal-agent-detail__tab-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  color: var(--portal-muted);
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.portal-agent-detail__tab.is-active .portal-agent-detail__tab-count {
+  color: var(--agent-detail-accent-hover);
+  background: var(--agent-detail-accent-soft);
+}
+
+.portal-agent-detail__panel {
+  flex: 1;
+  min-height: calc(100vh - 260px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 0 14px 14px;
+  background: var(--agent-detail-surface);
+  border: 1px solid var(--agent-detail-border);
+  border-top: none;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.03);
+  overflow: hidden;
+}
+
+.portal-agent-detail__panel-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--agent-detail-border);
+  background: var(--agent-detail-subtle);
+}
+
+.portal-agent-detail__panel-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--portal-text);
+}
+
+.portal-agent-detail__panel-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--portal-muted);
+}
+
+.portal-agent-detail__skills-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+
+.portal-agent-detail__basic-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 22px;
+}
+
+.portal-agent-detail__basic-form {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.portal-agent-detail__basic-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-agent-detail__basic-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--portal-text);
+}
+
+.portal-agent-detail__basic-required {
+  margin-left: 2px;
+  color: #ef4444;
+}
+
+.portal-agent-detail__basic-error {
+  font-size: 12px;
+  color: #ef4444;
+}
+
+.portal-agent-detail__basic-field .ant-input,
+.portal-agent-detail__basic-field .ant-input-textarea {
+  border-radius: 9px;
+}
+
+.portal-agent-detail__basic-field .ant-input:focus,
+.portal-agent-detail__basic-field .ant-input-textarea:focus {
+  border-color: var(--agent-detail-accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.portal-agent-detail__models-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.portal-agent-detail__models-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
+  justify-content: start;
+  gap: 12px;
+  width: 100%;
+  align-content: start;
+}
+
+.portal-agent-detail__models-grid-item {
+  min-width: 0;
+  display: flex;
+}
+
+.portal-agent-detail__model-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-height: 148px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--agent-detail-border);
+  background: var(--agent-detail-surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.portal-agent-detail__model-card:hover:not(:disabled):not(.is-readonly) {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: var(--agent-detail-accent-soft);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+  transform: translateY(-1px);
+}
+
+.portal-agent-detail__model-card.is-selected {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 4px 14px rgba(37, 99, 235, 0.1);
+}
+
+.portal-agent-detail__model-card.is-selected::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(90deg, var(--agent-detail-accent) 0%, #60a5fa 100%);
+}
+
+.portal-agent-detail__model-card.is-readonly {
+  cursor: default;
+}
+
+.portal-agent-detail__model-card:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.portal-agent-detail__model-card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--agent-detail-accent-hover);
+  background: var(--agent-detail-accent-muted);
+  margin-bottom: 10px;
+}
+
+.portal-agent-detail__model-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.portal-agent-detail__model-card-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--portal-text);
+  word-break: break-word;
+}
+
+.portal-agent-detail__model-card-provider {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid rgba(29, 78, 216, 0.12);
+}
+
+.portal-agent-detail__model-card-type {
+  align-self: flex-start;
+  margin-bottom: 8px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.portal-agent-detail__model-card-desc {
+  margin: 0;
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--portal-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.portal-agent-detail__model-card-desc.is-empty {
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.portal-agent-detail__skills-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 152px));
+  justify-content: start;
+  gap: 10px;
+  width: 100%;
+  align-content: start;
+}
+
+.portal-agent-detail__skills-grid-item {
+  min-width: 0;
+  display: flex;
+}
+
+.portal-agent-detail__skill-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 10px 10px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--agent-detail-border);
+  background: var(--agent-detail-surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.portal-agent-detail__skill-card:hover {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: var(--agent-detail-accent-soft);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+  transform: translateY(-1px);
+}
+
+.portal-agent-detail__skill-card--add {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1.5px dashed rgba(37, 99, 235, 0.35);
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  cursor: pointer;
+  text-align: center;
+}
+
+.portal-agent-detail__skill-card--add:hover:not(:disabled) {
+  border-color: var(--agent-detail-accent);
+  background: var(--agent-detail-accent-soft);
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.08);
+  transform: translateY(-1px);
+}
+
+.portal-agent-detail__skill-card--add:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  border-color: var(--agent-detail-border);
+  background: var(--agent-detail-subtle);
+  box-shadow: none;
+  transform: none;
+}
+
+.portal-agent-detail__skill-card-add-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--agent-detail-accent);
+  background: var(--agent-detail-accent-muted);
+}
+
+.portal-agent-detail__skill-card-add-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--agent-detail-accent-hover);
+  line-height: 1.3;
+}
+
+.portal-agent-detail__skill-card-add-hint {
+  font-size: 10px;
+  color: var(--portal-muted);
+  line-height: 1.35;
+}
+
+.portal-agent-detail__skill-card-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--agent-detail-accent-hover);
+  background: var(--agent-detail-accent-muted);
+  margin-bottom: 6px;
+}
+
+.portal-agent-detail__skill-card-name {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--portal-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.portal-agent-detail__skill-card-desc {
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--portal-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.portal-agent-detail__skill-card-desc.is-empty {
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.portal-agent-detail__skill-card-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #94a3b8;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.portal-agent-detail__skill-card:hover .portal-agent-detail__skill-card-remove,
+.portal-agent-detail__skill-card-remove:focus-visible {
+  opacity: 1;
+}
+
+.portal-agent-detail__skill-card-remove:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.portal-agent-detail__add-skill-search {
+  margin-bottom: 12px;
+}
+
+.portal-agent-detail__add-skill-list {
+  max-height: 360px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-agent-detail__add-skill-empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--portal-muted);
+}
+
+.portal-agent-detail__add-skill-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--agent-detail-border);
+  border-radius: 10px;
+  background: var(--agent-detail-subtle);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.portal-agent-detail__add-skill-item:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: var(--agent-detail-accent-soft);
+}
+
+.portal-agent-detail__add-skill-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.portal-agent-detail__add-skill-item-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--agent-detail-accent-hover);
+  background: var(--agent-detail-accent-muted);
+}
+
+.portal-agent-detail__add-skill-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portal-agent-detail__add-skill-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--portal-text);
+}
+
+.portal-agent-detail__add-skill-item-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--portal-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.portal-agent-detail__add-skill-item-action {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--agent-detail-accent);
+  font-size: 14px;
+}
+
+.portal-agent-detail__prompt-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-agent-detail__prompt-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  padding: 16px 18px;
+  background: var(--agent-detail-subtle);
+}
+
+.portal-agent-detail__prompt-stats {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--portal-muted);
+  background: #f1f5f9;
+  border-top: 1px solid var(--agent-detail-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.portal-agent-detail__prompt-viewport .ant-input-textarea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-radius: 10px;
+}
+
+.portal-agent-detail__prompt-editor.ant-input {
+  flex: 1;
+  min-height: 100%;
+  height: 100% !important;
+  max-height: none !important;
+  padding: 16px 18px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  resize: none;
+  background: #ffffff;
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.03),
+    0 1px 2px rgba(15, 23, 42, 0.02);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #334155;
+  tab-size: 2;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.portal-agent-detail__prompt-editor.ant-input:hover:not([disabled]) {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.portal-agent-detail__prompt-editor.ant-input:focus {
+  background: #ffffff;
+  border-color: var(--agent-detail-accent);
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.03),
+    0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.portal-agent-detail__prompt-editor.ant-input::placeholder {
+  color: #94a3b8;
+}
+
+.portal-agent-detail__prompt-editor.ant-input[disabled] {
+  color: #64748b;
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.08);
+  cursor: default;
+  box-shadow: none;
+}
+
+.portal-agent-detail__empty-state {
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 20px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.portal-agent-detail__empty-state .anticon {
+  font-size: 28px;
+  opacity: 0.35;
+}
+
+.portal-agent-detail__empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+@media (max-width: 960px) {
+  .portal-agent-detail__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-agent-detail__sidebar {
+    max-width: 100%;
+  }
+
+  .portal-agent-detail__panel {
+    min-height: min(520px, 58vh);
+  }
+}
+
+@media (max-width: 640px) {
+  .portal-agent-detail__tabs {
+    flex-direction: column;
+    padding: 4px;
+    border-radius: 12px;
+    border-bottom: 1px solid var(--agent-detail-border);
+  }
+
+  .portal-agent-detail__tab {
+    border-radius: 9px;
+    padding: 10px 14px;
+  }
+
+  .portal-agent-detail__tab.is-active::after {
+    left: 10px;
+    right: 10px;
+  }
+
+  .portal-agent-detail__panel {
+    margin-top: 12px;
+    border-radius: 14px;
+    border-top: 1px solid var(--agent-detail-border);
+  }
+
+  .portal-agent-detail__panel-bar {
+    flex-direction: column;
+  }
+
+  .portal-agent-detail__skills-grid {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 136px));
+  }
+
+  .portal-agent-detail__models-grid {
+    grid-template-columns: 1fr;
+  }
 }
