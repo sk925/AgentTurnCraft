@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.chat.base.models.agent_log import AgentLog
-from app.chat.group.event_publisher import EventPublisher
+from app.chat.shared.event_publisher import EventPublisher
 from app.chat.session.models import ChatSession
 from app.chat.session.service import get_session
 from app.config import _BACKEND_ROOT

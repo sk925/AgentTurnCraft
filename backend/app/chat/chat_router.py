@@ -6,13 +6,13 @@ import logging
 from typing import Annotated
 
 from app.auth import get_current_user_id
-from app.chat.group.chat_graph import get_checkpointer
-from app.chat.group.chat_window_rounds import (
+from app.chat.orchestration import (
     build_window_state_for_session_type,
     execute_chat_round_for_session_type,
 )
-from app.chat.group.event_publisher import EventPublisher
-from app.chat.group.window_chat_models import WindowChatRequest, normalize_window_file_ids
+from app.chat.shared.checkpointer import get_checkpointer
+from app.chat.shared.event_publisher import EventPublisher
+from app.chat.shared.window_models import WindowChatRequest, normalize_window_file_ids
 from app.database import SessionLocal, get_db
 from app.manage.login_session import assert_user_login_session
 from app.manage.rbac_api import load_manage_user
@@ -146,7 +146,7 @@ async def window_chat(
 ):
     """非流式 HTTP：触发 LangGraph，流式事件经 WebSocket ``/api/chat/ws`` 下发。"""
     window_state, window_graph, config = build_window_state_for_session_type(
-        window_chat_request, member_id, db, request.app.state.checkpointer
+        window_chat_request, db, request.app.state.checkpointer
     )
 
     publisher = EventPublisher()
@@ -158,7 +158,7 @@ async def window_chat(
 
     task = asyncio.create_task(
         execute_chat_round_for_session_type(
-            window_chat_request.session_type,
+            window_chat_request,
             window_graph,
             window_state,
             config,
@@ -266,7 +266,7 @@ async def chat_websocket(websocket: WebSocket):
 
             if msg_type == "chat":
                 chat_session_id = message.get("session_id")
-                if chat_session_id:
+                if chat_session_id and not message.get("resume"):
                     active_round = await publisher.get_active_round(str(chat_session_id))
                     if active_round:
                         await send_ws({"event": "error", "message": "当前有活跃的对话，请等待结束"})
@@ -377,9 +377,12 @@ async def chat_websocket(websocket: WebSocket):
 
                     if terminal_event == "error":
                         await publisher.set_round_status(session_id, round_id, "failed")
+                        await publisher.clear_active_round(session_id)
                     elif terminal_event in {"finished", "speaker_finished"}:
                         await publisher.set_round_status(session_id, round_id, "completed")
-                    await publisher.clear_active_round(session_id)
+                        await publisher.clear_active_round(session_id)
+                    elif terminal_event == "main_interrupt":
+                        await publisher.set_round_status(session_id, round_id, "interrupted")
                 finally:
                     db.close()
 

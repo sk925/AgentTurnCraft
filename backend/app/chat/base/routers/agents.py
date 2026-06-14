@@ -101,9 +101,9 @@ def update_agent(
     db.commit()
     db.refresh(agent)
     if "chat_model_id" in update_data:
-        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
 
-        evict_speaker_agent_graph_cache_for_agent_ids([agent_id])
+        evict_agent_runtime_cache_for_agent_ids([agent_id])
     return success_response(agent)
 
 
@@ -131,8 +131,7 @@ def add_skill_to_agent(
         return success_response({"linked": True}, message="关联成功")
 
     from app.chat.base.skill_materializer import ensure_skill_materialized
-    from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
-    from app.chat.single.single_chat import evict_single_chat_agent_cache_for_agent_ids
+    from app.harness import evict_agent_runtime_cache_for_agent_ids
 
     ensure_skill_materialized(
         skill.id,
@@ -143,8 +142,7 @@ def add_skill_to_agent(
 
     agent.skills.append(skill)
     db.commit()
-    evict_speaker_agent_graph_cache_for_agent_ids([agent_id])
-    evict_single_chat_agent_cache_for_agent_ids([agent_id])
+    evict_agent_runtime_cache_for_agent_ids([agent_id])
     from app.chat.base.skill_cache_broadcast import broadcast_agent_skills_changed
 
     broadcast_agent_skills_changed([agent_id], materialize_skill_ids=[skill_id])
@@ -171,11 +169,9 @@ def remove_skill_from_agent(
     if skill in agent.skills:
         agent.skills.remove(skill)
         db.commit()
-        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
-        from app.chat.single.single_chat import evict_single_chat_agent_cache_for_agent_ids
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
 
-        evict_speaker_agent_graph_cache_for_agent_ids([agent_id])
-        evict_single_chat_agent_cache_for_agent_ids([agent_id])
+        evict_agent_runtime_cache_for_agent_ids([agent_id])
         from app.chat.base.skill_cache_broadcast import broadcast_agent_skills_changed
 
         broadcast_agent_skills_changed([agent_id])

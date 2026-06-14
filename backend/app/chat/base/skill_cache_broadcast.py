@@ -58,8 +58,7 @@ def _handle_message(payload: dict[str, Any]) -> None:
 
     if action == "agent_skills_changed":
         from app.chat.base.skill_materializer import materialize_skill_by_id
-        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
-        from app.chat.single.single_chat import evict_single_chat_agent_cache_for_agent_ids
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
 
         for skill_id in payload.get("materialize_skill_ids", []):
             try:
@@ -69,8 +68,7 @@ def _handle_message(payload: dict[str, Any]) -> None:
 
         agent_ids = [int(aid) for aid in payload.get("agent_ids", [])]
         if agent_ids:
-            evict_speaker_agent_graph_cache_for_agent_ids(agent_ids)
-            evict_single_chat_agent_cache_for_agent_ids(agent_ids)
+            evict_agent_runtime_cache_for_agent_ids(agent_ids)
             logger.info("agent skill caches evicted on this node: agent_ids=%s", agent_ids)
 
 

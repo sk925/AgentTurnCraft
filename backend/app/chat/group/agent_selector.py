@@ -1,5 +1,5 @@
 from app.config import settings
-from app.chat.group.chat_common import MsgType, RoleType, WindowState, save_token_usage
+from app.chat.shared.chat_common import MsgType, RoleType, WindowState, save_token_usage
 from app.tools.parse_file import parse_file_by_id
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -112,9 +112,7 @@ def select_agent(window_state: WindowState) -> GroupSelection:
         SystemMessage(content=prompt),
         HumanMessage(content=user_message),
     ]
-    print("======select_agent-messages==============")
-    print(messages)
-    print("======select_agent-messages==============")
+   
     result = structured.invoke(messages,config={"response_format": GroupSelection, "tools": [parse_file_by_id]})
 
     raw_data = result.get("raw", None)

@@ -1,35 +1,24 @@
-import json
 import re
-import threading
-from collections import OrderedDict
-from typing import Any, Iterable
+from typing import Any
 
-from app.chat.deepseek_chat_openai import DeepSeekChatOpenAI
-from app.database import transactional_session
-from app.model_manage.model_manage_service import ModelManageService
-from app.chat.base.models.agent_log import AgentLogService
-from app.chat.group.chat_common import (
+from app.chat.base.models import Agent
+from app.chat.shared.chat_common import (
     ChatRecord,
-    InnerNode,
-    MsgType,
     NoSpeakerError,
     RoleType,
     SpearkerRecord,
     UserProfile,
-    WindowState
+    WindowState,
 )
-from app.chat.group.event_publisher import EventPublisher
-from app.chat.base.models import Agent
-from app.tools.ask_user import ask_user_question
-from app.tools.parse_file import FileParser, parse_file_by_id
+from app.chat.shared.streaming import stream_messages, stream_updates
+from app.harness import AgentBuildConfig, AgentRuntime, AgentRuntimeMode
+from app.harness.cache import (
+    clear_speaker_agent_graph_cache,
+    evict_speaker_agent_graph_cache_for_agent_ids,
+)
 from langchain.agents.middleware import ModelRequest
 from langchain.agents.middleware.types import dynamic_prompt
-from langchain_community.tools import DuckDuckGoSearchRun
 from langgraph.graph.state import CompiledStateGraph
-from deepagents.backends import LocalShellBackend
-
-from deepagents import create_deep_agent
-from app.config import _BACKEND_ROOT
 
 BASE_RULE = """
 <base_rule>                                                                                                                            
@@ -128,8 +117,6 @@ class SpeakContext:
 artifact_dir = "/workspace" # 产物目录
 
 
-web_search = DuckDuckGoSearchRun()
-
 @dynamic_prompt
 def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
     """动态更改提示词"""
@@ -188,56 +175,8 @@ def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
     
     final_prompt = base_rule_prompt + "\n" + deep_agent_inner_prompt + "\n" + user_custom_prompt + "\n" + scene_description_prompt
 
-    print("======final_prompt==============")
-    print(final_prompt)
-    print("======final_prompt==============")
-
     return final_prompt
 
-
-
-
-# (speaker_id, checkpointer_id) → 编译后的 deep agent 图；LRU 淘汰避免长进程内存持续上涨
-_SPEAKER_AGENT_CACHE_MAX = 128
-speaker_agent_map: OrderedDict[tuple[int, int], CompiledStateGraph] = OrderedDict()
-_speaker_agent_lock = threading.RLock()
-
-
-def _touch_speaker_agent_cache(cache_key: tuple[int, int], graph: CompiledStateGraph) -> None:
-    """插入或刷新 LRU 顺序；满了淘汰最久未用条目。"""
-    if cache_key in speaker_agent_map:
-        del speaker_agent_map[cache_key]
-    elif _SPEAKER_AGENT_CACHE_MAX > 0 and len(speaker_agent_map) >= _SPEAKER_AGENT_CACHE_MAX:
-        speaker_agent_map.popitem(last=False)
-    speaker_agent_map[cache_key] = graph
-
-
-def evict_speaker_agent_graph_cache_for_agent_ids(agent_ids: Iterable[int]) -> None:
-    """按智能体 id 淘汰已编译的发言人图（缓存键为 ``(agent_id, checkpointer_id)`` 的第一维）。"""
-    affected = {int(aid) for aid in agent_ids}
-    if not affected:
-        return
-    with _speaker_agent_lock:
-        stale_keys = [k for k in speaker_agent_map if k[0] in affected]
-        for k in stale_keys:
-            del speaker_agent_map[k]
-
-
-def clear_speaker_agent_graph_cache() -> None:
-    """清空全部发言人 deep agent 编译缓存。
-
-    一般应优先使用 `evict_speaker_agent_graph_cache_for_agent_ids`；本函数仅用于运维或极端场景。
-    """
-    with _speaker_agent_lock:
-        speaker_agent_map.clear()
-
-
-def make_project_backend(_runtime: Any) -> LocalShellBackend:
-    return LocalShellBackend(
-        root_dir=_BACKEND_ROOT,
-        virtual_mode=True,
-        inherit_env=True,
-    )
 
 def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledStateGraph, str]:
     """创建发言人智能体"""
@@ -250,221 +189,29 @@ def speak_agent(window_state: WindowState, checkpointer: Any) -> tuple[CompiledS
     if current_agent_info is None:
         raise NoSpeakerError(f"发言人{current_speaker.get('id', '')}:{current_speaker.get('name', '')}不存在于群聊成员列表")
 
-    from app.chat.base.skill_materializer import ensure_agent_skills_materialized
-
     agent_id = current_agent_info["id"]
-    ensure_agent_skills_materialized(agent_id)
-
-    from app.chat.base.skill_materializer import get_agent_skill_ids
-
-    cache_key = (agent_id, id(checkpointer), get_agent_skill_ids(agent_id))
-    with _speaker_agent_lock:
-        compiled_graph = speaker_agent_map.get(cache_key)
-        if compiled_graph is not None:
-            speaker_agent_map.move_to_end(cache_key)
-            return compiled_graph, current_agent_info['prompt']
-
-    with transactional_session() as session:
-        # 查询模型信息
-        model_info_service = ModelManageService(session)
-        model_info = model_info_service.get_chat_model_info_by_model_id(current_agent_info['chat_model_id'])
-        llm_model = DeepSeekChatOpenAI(
-            model=model_info.model_name,
-            base_url=model_info.base_url,
-            api_key=model_info.api_key,
-            stream_usage=True
+    compiled_graph = AgentRuntime.build(
+        AgentBuildConfig(
+            agent_id=agent_id,
+            chat_model_id=int(current_agent_info["chat_model_id"]),
+            checkpointer=checkpointer,
+            middleware=[format_wrap_prompt],
+            context_schema=SpeakContext,
+            mode=AgentRuntimeMode.SPEAKER,
         )
-
-    with _speaker_agent_lock:
-        compiled_graph = speaker_agent_map.get(cache_key)
-        if compiled_graph is not None:
-            speaker_agent_map.move_to_end(cache_key)
-            return compiled_graph, current_agent_info['prompt']
-        from app.chat.base.skill_materializer import build_skill_virtual_paths_for_agent
-
-        skill_sources = build_skill_virtual_paths_for_agent(current_agent_info["id"])
-        compiled_graph = create_deep_agent(model=llm_model, 
-                                   system_prompt="", 
-                                   tools=[ask_user_question,FileParser(),web_search],
-                                   skills=skill_sources or None,
-                                   middleware=[format_wrap_prompt],
-                                   context_schema=SpeakContext,
-                                   checkpointer=checkpointer,
-                                   backend=make_project_backend)
-        _touch_speaker_agent_cache(cache_key, compiled_graph)
-        return compiled_graph, current_agent_info['prompt']
+    )
+    return compiled_graph, current_agent_info["prompt"]
 
 
-
-async def stream_messages(
-    data: Any,
-    publisher: EventPublisher,
-    session_id: str,
-    round_id: str,
-    current_speaker: dict[str, Any],
-):
-    """处理发言人发言的流式增量"""
-    if isinstance(data, tuple) and len(data) >= 2:
-        message, meta = data[0], data[1]
-        delta = _message_chunk_text(message)
-        if delta:
-            inner_node = meta.get("langgraph_node", "") if isinstance(meta, dict) else ""
-            if inner_node == InnerNode.MODEL.value:
-                await publisher.publish(
-                    session_id,
-                    round_id,
-                    {
-                        "event": "speaker_model_stream",
-                        "speaker_id": current_speaker.get("id"),
-                        "speaker_name": current_speaker.get("name"),
-                        "delta": delta,
-                        "inner_node": inner_node,
-                    },
-                )
-            elif inner_node == InnerNode.TOOL.value:
-                print(f"tool_output={message}")
-
-
-async def stream_updates(
-    data: Any,
-    publisher: EventPublisher,
-    session_id: str,
-    round_id: str,
-    current_speaker: dict[str, Any],
-    user_id: int,
-):
-    """处理发言人发言的流式增量"""
-    if "model" in data:
-        final_msg = data["model"]["messages"]
-        ai_msg = final_msg[0]
-        if ai_msg.tool_calls:
-            tool_calls: list[dict] = []
-            for tool_call in ai_msg.tool_calls:
-                if tool_call["name"] == "write_todos":
-                    continue
-                if tool_call["name"] == "ask_user_question":
-                    await publisher.publish(
-                        session_id,
-                        round_id,
-                        {
-                            "event": "speaker_interrupt",
-                            "args": tool_call["args"],
-                            "tool_id": tool_call.get("id") or "",
-                            "speaker_id": current_speaker.get("id"),
-                            "speaker_name": current_speaker.get("name")
-                        },
-                    )
-                    await AgentLogService.save_model_message(
-                        user_id,
-                        session_id,
-                        round_id,
-                        MsgType.INTERACTIVE.value,
-                        current_speaker,
-                        RoleType.SPEAKER.value,
-                        json.dumps(tool_call["args"], ensure_ascii=False),
-                    )
-                    continue
-                tool_calls.append(
-                    {
-                        "tool_name": tool_call["name"],
-                        "tool_args": tool_call["args"],
-                        "tool_id": tool_call["id"],
-                    }
-                )
-            if len(tool_calls) > 0:
-                await publisher.publish(
-                    session_id,
-                    round_id,
-                    {
-                        "event": "speaker_tool_call",
-                        "tool_calls": tool_calls,
-                        "speaker_id": current_speaker.get("id"),
-                        "speaker_name": current_speaker.get("name"),
-                    },
-                )
-            await AgentLogService.save_model_message(
-                user_id,
-                session_id,
-                round_id,
-                MsgType.TOOL_CALL.value,
-                current_speaker,
-                RoleType.SPEAKER.value,
-                ai_msg,
-            )
-        else:
-            await AgentLogService.save_model_message(
-                user_id,
-                session_id,
-                round_id,
-                MsgType.MODEL.value,
-                current_speaker,
-                RoleType.SPEAKER.value,
-                ai_msg,
-            )
-    elif "tools" in data:
-        print(f"[DEBUG tools] payload: {data}")
-        tool_msg_list = data["tools"]["messages"]
-        for tool_msg in tool_msg_list:
-            if tool_msg.name == "write_todos":
-                await AgentLogService.save_model_message(
-                    user_id,
-                    session_id,
-                    round_id,
-                    MsgType.TODO_LIST.value,
-                    current_speaker,
-                    RoleType.SPEAKER.value,
-                    tool_msg,
-                )
-                continue
-            if tool_msg.name == "ask_user_question":
-                continue
-            await AgentLogService.save_model_message(
-                user_id,
-                session_id,
-                round_id,
-                MsgType.TOOL_OUT.value,
-                current_speaker,
-                RoleType.SPEAKER.value,
-                tool_msg,
-            )
-            await publisher.publish(
-                session_id,
-                round_id,
-                {
-                    "event": "speaker_tool_out",
-                    "tool_name": tool_msg.name,
-                    "content": tool_msg.content,
-                    "tool_id": tool_msg.tool_call_id,
-                    "speaker_id": current_speaker.get("id"),
-                    "speaker_name": current_speaker.get("name"),
-                },
-            )
-        todos = None
-        if isinstance(data.get("tools"), dict):
-            todos = data["tools"].get("todos")
-        if todos:
-            await publisher.publish(
-                session_id,
-                round_id,
-                {
-                    "event": "speaker_todo_list",
-                    "todos": todos,
-                    "speaker_id": current_speaker.get("id"),
-                    "speaker_name": current_speaker.get("name"),
-                },
-            )
-    elif "todos" in data and data.get("todos"):
-        await publisher.publish(
-            session_id,
-            round_id,
-            {
-                "event": "speaker_todo_list",
-                "todos": data["todos"],
-                "speaker_id": current_speaker.get("id"),
-                "speaker_name": current_speaker.get("name"),
-            },
-        )
-
+__all__ = [
+    "SpeakContext",
+    "clear_speaker_agent_graph_cache",
+    "evict_speaker_agent_graph_cache_for_agent_ids",
+    "format_wrap_prompt",
+    "speak_agent",
+    "stream_messages",
+    "stream_updates",
+]
 
 
 def _format_group_members(group_members: list[dict]) -> str:
@@ -480,21 +227,3 @@ def _format_group_members(group_members: list[dict]) -> str:
         else:
             lines.append(f"- {name}")
     return "\n".join(lines)
-
-
-def _message_chunk_text(message: object) -> str:
-    """从 LangChain 消息 / 分片中取出可下发的文本增量。"""
-    content = getattr(message, "content", None)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        return "".join(parts)
-    if content is not None:
-        return str(content)
-    return ""                

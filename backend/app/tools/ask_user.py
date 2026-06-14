@@ -45,6 +45,9 @@ def ask_user_question(
         "questions": [q.model_dump() for q in questions],
     }
     result = "用户放弃,停止任务"
+    print("======ask_user_question_payload==============")
+    print(payload)
+    print("======ask_user_question_payload==============")
     while True:
         user_input = interrupt(payload)
         print("======ask_user_question==============")

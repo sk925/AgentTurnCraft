@@ -4,7 +4,7 @@ from sqlalchemy import JSON, BigInteger, Column, DateTime, Integer, String
 from sqlalchemy.sql import func
 
 from app.database import Base
-from app.chat.group.chat_common import SessionType
+from app.chat.shared.chat_common import SessionType
 
 
 class ChatSession(Base):

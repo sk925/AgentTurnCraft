@@ -3,7 +3,7 @@ from typing import Annotated, Any
 
 from app.auth import CurrentUser, get_current_user, get_current_user_optional
 from app.config import settings
-from app.chat.group.chat_common import MsgType, RoleType, SessionType
+from app.chat.shared.chat_common import MsgType, RoleType, SessionType
 from app.chat.base.models.agent_log import AgentLog
 from app.chat.base.models.upload_file import UploadFile
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.chat.base.schemas import ApiResponse, success_response
-from app.chat.group.chat_graph import get_checkpointer
+from app.chat.shared.checkpointer import get_checkpointer
 from app.chat.session.delete_service import (
     delete_session_records,
     purge_session_runtime_state,

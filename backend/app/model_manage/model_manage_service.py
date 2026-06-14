@@ -58,9 +58,9 @@ class ModelManageService:
         agent_ids = self._agent_ids_bound_to_chat_models(chat_model_ids)
         if not agent_ids:
             return
-        from app.chat.group.speaker import evict_speaker_agent_graph_cache_for_agent_ids
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
 
-        evict_speaker_agent_graph_cache_for_agent_ids(agent_ids)
+        evict_agent_runtime_cache_for_agent_ids(agent_ids)
 
     def create_model_provider(self, model_provider: ModelProviderCreateRequest) -> ModelProviderResponse:
         row = ModelProvider(

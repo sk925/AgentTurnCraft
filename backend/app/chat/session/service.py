@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.chat.group.chat_common import SessionType
+from app.chat.shared.chat_common import SessionType
 from app.chat.session.models import ChatSession
 
 

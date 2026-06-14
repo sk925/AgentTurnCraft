@@ -1,5 +1,5 @@
 from app.config import settings
-from app.chat.group.chat_common import RoleType, WindowState, save_token_usage
+from app.chat.shared.chat_common import RoleType, WindowState, save_token_usage
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Modal,
@@ -10,9 +10,9 @@ import {
   Typography,
   Empty,
   Spin,
-  Card,
   Form,
   Input,
+  Select,
   Tooltip,
 } from 'antd';
 import type { UploadFile } from 'antd';
@@ -22,6 +22,7 @@ import {
   EditOutlined,
   ThunderboltOutlined,
   ClockCircleOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getBackendErrorMessage, goLoginPage, isUserLoggedIn, skillsApi } from '../api';
@@ -30,8 +31,15 @@ import type { Skill } from '../api';
 const { Title, Paragraph } = Typography;
 
 const HOVER_DELAY_SEC = 0.5;
-const CLAMP_LINES = 2;
 const BUILTIN_TYPE = 1;
+
+type SkillTypeFilter = 'all' | 'custom' | 'builtin';
+
+const SKILL_TYPE_FILTER_OPTIONS: { label: string; value: SkillTypeFilter }[] = [
+  { label: '全部', value: 'all' },
+  { label: '自定义', value: 'custom' },
+  { label: '系统内建', value: 'builtin' },
+];
 
 function formatSkillDate(iso: string) {
   const d = new Date(iso);
@@ -40,21 +48,22 @@ function formatSkillDate(iso: string) {
   return `${date} ${time}`;
 }
 
-function ClampHoverText({
-  text,
-  placeholder = '—',
-  lines = CLAMP_LINES,
-  variant = 'primary',
-}: {
-  text: string | null | undefined;
-  placeholder?: string;
-  lines?: number;
-  variant?: 'primary' | 'secondary';
-}) {
-  const ref = useRef<HTMLDivElement>(null);
+function resolveSkillDisplayDesc(skill: Skill) {
+  const custom = skill.description?.trim();
+  if (custom) {
+    return custom;
+  }
+  const pkg = skill.skill_desc?.trim();
+  if (pkg) {
+    return pkg;
+  }
+  return '暂无描述';
+}
+
+function SkillCardDesc({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
   const [overflow, setOverflow] = useState(false);
-  const isEmpty = !text?.trim();
-  const display = isEmpty ? placeholder : text!.trim();
+  const isEmpty = text === '暂无描述';
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -62,20 +71,15 @@ function ClampHoverText({
       return;
     }
     setOverflow(el.scrollHeight > el.clientHeight + 1);
-  }, [display, lines]);
+  }, [text]);
 
   const body = (
-    <div
-      className={`portal-skill-card__content portal-skill-card__content--${variant}`}
+    <p
+      ref={ref}
+      className={`portal-skill-card__desc${isEmpty ? ' is-empty' : ''}${overflow ? ' is-help' : ''}`}
     >
-      <p
-        ref={ref}
-        className={`portal-skill-card__clamp${isEmpty ? ' is-empty' : ''}${overflow ? ' is-help' : ''}`}
-        style={{ WebkitLineClamp: lines }}
-      >
-        {display}
-      </p>
-    </div>
+      {text}
+    </p>
   );
 
   if (!overflow || isEmpty) {
@@ -83,8 +87,46 @@ function ClampHoverText({
   }
 
   return (
-    <Tooltip title={display} mouseEnterDelay={HOVER_DELAY_SEC} styles={{ root: { maxWidth: 360 } }}>
+    <Tooltip
+      title={<span className="portal-skill-card__desc-tooltip">{text}</span>}
+      mouseEnterDelay={HOVER_DELAY_SEC}
+      styles={{ root: { maxWidth: 360 } }}
+    >
       {body}
+    </Tooltip>
+  );
+}
+
+function SkillCardTitle({ name }: { name: string }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [overflow, setOverflow] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    setOverflow(el.scrollWidth > el.clientWidth + 1);
+  }, [name]);
+
+  const title = (
+    <h3 ref={ref} className={`portal-skill-card__title${overflow ? ' is-truncated' : ''}`}>
+      {name}
+    </h3>
+  );
+
+  if (!overflow) {
+    return title;
+  }
+
+  return (
+    <Tooltip
+      title={name}
+      mouseEnterDelay={HOVER_DELAY_SEC}
+      color="rgba(15, 23, 42, 0.92)"
+      styles={{ root: { maxWidth: 360 } }}
+    >
+      <div className="portal-skill-card__title-wrap">{title}</div>
     </Tooltip>
   );
 }
@@ -101,90 +143,74 @@ function SkillCard({
   const isBuiltin = skill.type === BUILTIN_TYPE;
   const loggedIn = isUserLoggedIn();
   const canManage = loggedIn && !isBuiltin;
+  const displayDesc = resolveSkillDisplayDesc(skill);
 
   return (
-    <Card className="portal-card portal-skill-card" hoverable variant="borderless" style={{ height: '100%' }}>
-      <div className="portal-card__head">
-        <div className="portal-card__avatar" aria-hidden>
+    <article className="portal-skill-card-wrap">
+      <span
+        className={`portal-skill-card__badge portal-skill-card__badge--corner ${
+          isBuiltin ? 'portal-skill-card__badge--builtin' : 'portal-skill-card__badge--custom'
+        }`}
+      >
+        {isBuiltin ? '内置' : '自定义'}
+      </span>
+
+      {loggedIn && (
+        <div className="portal-skill-card__hover-actions" onClick={(e) => e.stopPropagation()}>
+          <Tooltip title={isBuiltin ? '内置技能不可编辑' : '编辑描述'}>
+            <button
+              type="button"
+              className="portal-skill-card__icon-btn"
+              disabled={!canManage}
+              aria-label="编辑描述"
+              onClick={() => onEdit(skill)}
+            >
+              <EditOutlined />
+            </button>
+          </Tooltip>
+          <Popconfirm
+            title="确定删除该技能吗？"
+            onConfirm={() => void onDelete(skill.id)}
+            okText="确定"
+            cancelText="取消"
+            disabled={!canManage}
+          >
+            <Tooltip title={isBuiltin ? '内置技能不可删除' : '删除'}>
+              <button
+                type="button"
+                className="portal-skill-card__icon-btn portal-skill-card__icon-btn--delete"
+                disabled={!canManage}
+                aria-label="删除技能"
+              >
+                <DeleteOutlined />
+              </button>
+            </Tooltip>
+          </Popconfirm>
+        </div>
+      )}
+
+      <div className="portal-skill-card__badge-row" aria-hidden />
+
+      <div className="portal-skill-card__head">
+        <div className="portal-skill-card__avatar" aria-hidden>
           <ThunderboltOutlined />
         </div>
         <div className="portal-skill-card__head-main">
-          <div className="portal-skill-card__title-row">
-            <h3 className="portal-card__title">{skill.name}</h3>
-            <span
-              className={`portal-skill-card__badge ${
-                isBuiltin ? 'portal-skill-card__badge--builtin' : 'portal-skill-card__badge--custom'
-              }`}
-            >
-              {isBuiltin ? '内置' : '自定义'}
-            </span>
-          </div>
-          <div className="portal-skill-card__meta">
-            <ClockCircleOutlined style={{ fontSize: 10, opacity: 0.7 }} />
-            <span>{formatSkillDate(skill.create_time)}</span>
-          </div>
+          <SkillCardTitle name={skill.name} />
         </div>
       </div>
 
-      <div className="portal-card__body">
-        <div className="portal-skill-card__sections">
-          <section>
-            <div className="portal-skill-card__section-head">
-              <span className="portal-skill-card__label">
-                <span className="portal-skill-card__label-mark portal-skill-card__label-mark--primary" />
-                自定义描述
-              </span>
-              {loggedIn && (
-                <Tooltip title={isBuiltin ? '内置技能不可编辑' : '编辑描述'}>
-                  <button
-                    type="button"
-                    className="portal-skill-card__inline-edit"
-                    disabled={!canManage}
-                    aria-label="编辑自定义描述"
-                    onClick={() => onEdit(skill)}
-                  >
-                    <EditOutlined style={{ fontSize: 11 }} />
-                  </button>
-                </Tooltip>
-              )}
-            </div>
-            <ClampHoverText text={skill.description} placeholder="暂无描述" variant="primary" />
-          </section>
-
-          <section>
-            <div className="portal-skill-card__section-head">
-              <span className="portal-skill-card__label">
-                <span className="portal-skill-card__label-mark portal-skill-card__label-mark--secondary" />
-                包内描述
-              </span>
-            </div>
-            <ClampHoverText text={skill.skill_desc} lines={1} variant="secondary" />
-          </section>
-        </div>
+      <div className="portal-skill-card__middle">
+        <SkillCardDesc text={displayDesc} />
       </div>
 
-      {loggedIn && (
-        <div className="portal-card__footer">
-          <div className="portal-skill-card__actions">
-            <Popconfirm
-              title="确定删除该技能吗？"
-              onConfirm={() => void onDelete(skill.id)}
-              okText="确定"
-              cancelText="取消"
-              disabled={!canManage}
-            >
-              <Button
-                className="portal-skill-card__action-btn portal-skill-card__action-btn--delete"
-                icon={<DeleteOutlined />}
-                disabled={!canManage}
-              >
-                删除
-              </Button>
-            </Popconfirm>
-          </div>
-        </div>
-      )}
-    </Card>
+      <div className="portal-skill-card__bottom">
+        <span className="portal-skill-card__meta">
+          <ClockCircleOutlined />
+          {formatSkillDate(skill.create_time)}
+        </span>
+      </div>
+    </article>
   );
 }
 
@@ -202,6 +228,8 @@ export default function SkillsPage() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<SkillTypeFilter>('all');
 
   const fetchSkills = async () => {
     setLoading(true);
@@ -328,16 +356,48 @@ export default function SkillsPage() {
     }
   };
 
+  const displaySkills = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return skills.filter((skill) => {
+      if (typeFilter === 'builtin' && skill.type !== BUILTIN_TYPE) {
+        return false;
+      }
+      if (typeFilter === 'custom' && skill.type === BUILTIN_TYPE) {
+        return false;
+      }
+      if (!q) {
+        return true;
+      }
+      const desc = resolveSkillDisplayDesc(skill).toLowerCase();
+      return skill.name.toLowerCase().includes(q) || desc.includes(q);
+    });
+  }, [skills, searchQuery, typeFilter]);
+
+  const isFiltering = searchQuery.trim().length > 0 || typeFilter !== 'all';
+
   return (
     <div>
       <div className="portal-page-hero">
         <Title level={2}>技能</Title>
         <Paragraph type="secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
-          技能以压缩包形式扩展智能体能力。上传后可在「智能体」卡片中为角色关联技能。
+          技能以压缩包形式扩展智能体能力。上传后可在「智能体」详情中为角色关联技能。
         </Paragraph>
-        <div className="portal-toolbar">
-          <div className="portal-toolbar-left">
-            <span style={{ color: 'var(--portal-muted)', fontSize: 13 }}>支持 .zip 技能包</span>
+        <div className="portal-toolbar portal-skills-toolbar">
+          <div className="portal-toolbar-left portal-skills-toolbar__left">
+            <Input
+              allowClear
+              prefix={<SearchOutlined style={{ color: 'var(--portal-muted)' }} />}
+              placeholder="搜索技能名称/描述..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="portal-skills-toolbar__search"
+            />
+            <Select
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={SKILL_TYPE_FILTER_OPTIONS}
+              className="portal-skills-toolbar__filter"
+            />
           </div>
           <div className="portal-toolbar-actions">
             {isUserLoggedIn() && (
@@ -350,11 +410,13 @@ export default function SkillsPage() {
       </div>
 
       <Spin spinning={loading}>
-        {skills.length === 0 ? (
+        {!loading && skills.length === 0 ? (
           <Empty description="暂无技能，上传符合规范的 .zip 技能包" />
+        ) : !loading && displaySkills.length === 0 ? (
+          <Empty description={isFiltering ? '未找到匹配的技能' : '暂无技能'} />
         ) : (
-          <Row gutter={[14, 14]}>
-            {skills.map((skill) => (
+          <Row gutter={[14, 14]} className="portal-skills-grid">
+            {displaySkills.map((skill) => (
               <Col xs={24} sm={12} md={8} lg={6} xl={4} key={skill.id}>
                 <SkillCard skill={skill} onEdit={openEditModal} onDelete={handleDelete} />
               </Col>

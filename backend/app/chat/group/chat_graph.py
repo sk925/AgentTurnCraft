@@ -1,9 +1,12 @@
 import time
+
 from app.chat.group.agent_selector import GroupSelection, select_agent
-from app.chat.group.chat_common import ChatRecord, MsgType, RoleType, WindowState
-from app.chat.group.event_publisher import EventPublisher
-from app.chat.group.speaker import speak_agent, stream_messages, stream_updates
+from app.chat.group.speaker import speak_agent
 from app.chat.group.speaker_selector import SpeakerSelection, select_speaker
+from app.chat.shared.chat_common import ChatRecord, MsgType, RoleType, WindowState
+from app.chat.shared.checkpointer import get_sub_checkpointer
+from app.chat.shared.event_publisher import EventPublisher
+from app.chat.shared.streaming import stream_messages, stream_updates
 from langgraph.constants import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command, interrupt
@@ -16,7 +19,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
     """创建群聊工作流"""
 
     # 子图（speaker deep agent）使用独立的 checkpointer，避免与父图 checkpoint 冲突
-    sub_checkpointer = _SUB_CHECKPOINTER
+    sub_checkpointer = get_sub_checkpointer()
 
     def select_agents_node(window_state: WindowState):
         """筛选可用员工"""
@@ -197,7 +200,7 @@ def build_graph(checkpointer) -> CompiledStateGraph:
                 if isinstance(data, dict):
                     if data.get('__interrupt__'):
                         question_data = data.get('__interrupt__')[0].value
-                        break
+                        
                 if data.get("model"):
                     last_updates = data
                 await stream_updates(data, publisher, session_id, round_id, current_speaker, window_state.get("user_profile", {}).get("member_id", 0))
@@ -246,6 +249,9 @@ def build_graph(checkpointer) -> CompiledStateGraph:
         """打断节点"""
         question_data = window_state.get("question_data", {})
         user_input = interrupt(question_data)
+        print("========interrupt_node==============")
+        print("user_input", user_input)
+        print("========interrupt_node==============")
 
        
         if user_input.get("cancel"):
@@ -294,22 +300,17 @@ def get_chat_window_graph(checkpointer) -> CompiledStateGraph:
     return get_window_graph(checkpointer)
 
 
-# WebSocket handler 通过模块变量访问 checkpointer，避免 websocket.app.state 兼容问题
-_CHECKPOINTER = None
-_SUB_CHECKPOINTER = None
+from app.chat.shared.checkpointer import (  # noqa: E402
+    get_checkpointer,
+    set_checkpointer,
+    set_sub_checkpointer,
+)
 
-
-def set_checkpointer(checkpointer) -> None:
-    global _CHECKPOINTER
-    _CHECKPOINTER = checkpointer
-
-
-def set_sub_checkpointer(checkpointer) -> None:
-    global _SUB_CHECKPOINTER
-    _SUB_CHECKPOINTER = checkpointer
-
-
-def get_checkpointer():
-    if _CHECKPOINTER is None:
-        raise RuntimeError("checkpointer 未初始化")
-    return _CHECKPOINTER
+__all__ = [
+    "build_graph",
+    "get_chat_window_graph",
+    "get_checkpointer",
+    "get_window_graph",
+    "set_checkpointer",
+    "set_sub_checkpointer",
+]

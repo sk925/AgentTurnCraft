@@ -9,7 +9,7 @@ configure_logging()
 
 from app.exceptions import register_exception_handler
 from app.chat.chat_router import router as chat_router
-from app.chat.group.chat_graph import set_checkpointer, set_sub_checkpointer
+from app.chat.shared.checkpointer import set_checkpointer, set_sub_checkpointer
 from app.redis_client import init_redis, close_redis
 from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
 from app.chat.session import router as session_router

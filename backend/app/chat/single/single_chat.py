@@ -1,26 +1,16 @@
 import logging
-import threading
-from typing import Any, Iterable, TypedDict
+from typing import Any, TypedDict
 
 from app.chat.base.models import Agent, AgentService
-from app.chat.deepseek_chat_openai import DeepSeekChatOpenAI
-from app.chat.group.event_publisher import EventPublisher
-from app.chat.group.speaker import stream_messages, stream_updates
+from app.chat.shared.checkpointer import get_checkpointer
+from app.chat.shared.event_publisher import EventPublisher
+from app.chat.shared.streaming import stream_messages, stream_updates
 from app.config import settings
-from app.database import transactional_session
 from app.exceptions import AppException
-from app.model_manage.model_manage_service import ModelManageService
-from app.tools.ask_user import ask_user_question
-from app.tools.parse_file import FileParser, parse_file_by_id
-from deepagents import create_deep_agent
-from deepagents.backends import LocalShellBackend
+from app.harness import AgentBuildConfig, AgentRuntime, AgentRuntimeMode
 from fastapi import status
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
-from langchain_community.tools import DuckDuckGoSearchRun
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
-from app.config import _BACKEND_ROOT
-from app.chat.group.chat_graph import get_checkpointer
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +76,6 @@ class SingleChatContext(TypedDict, total=False):
     user_id: int
     user_custom_prompt: str
 
-def make_project_backend(_runtime: Any) -> LocalShellBackend:
-    return LocalShellBackend(
-        root_dir=_BACKEND_ROOT,
-        virtual_mode=True,
-        inherit_env=True,
-    )
-
-web_search = DuckDuckGoSearchRun()
 @dynamic_prompt
 def wrap_dynamic_prompt(request: ModelRequest) -> str:
     deep_agent_prompt = request.system_prompt or ""
@@ -119,27 +101,6 @@ class ChatRountInfo(TypedDict, total=False):
     file_ids: list[int]
     attachment_context: str
     resume: dict[str, Any] | None
-
-
-# 单个智能体对话缓存，key: {agent_id}_single_chat_{skill_ids}
-agent_map: dict[str, CompiledStateGraph] = {}
-_single_chat_agent_lock = threading.RLock()
-
-
-def _single_chat_cache_key(agent_id: int, skill_ids: tuple[int, ...]) -> str:
-    skill_part = "-".join(str(sid) for sid in skill_ids) if skill_ids else "none"
-    return f"{agent_id}_single_chat_{skill_part}"
-
-
-def evict_single_chat_agent_cache_for_agent_ids(agent_ids: Iterable[int]) -> None:
-    """按智能体 id 淘汰单聊 deep agent 编译缓存。"""
-    affected = {int(aid) for aid in agent_ids}
-    if not affected:
-        return
-    with _single_chat_agent_lock:
-        stale = [k for k in agent_map if any(k.startswith(f"{aid}_single_chat") for aid in affected)]
-        for key in stale:
-            agent_map.pop(key, None)
 
 
 def get_agent_info(agent_id: int) -> Agent:
@@ -169,45 +130,16 @@ async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: Even
     if agent_info['chat_model_id'] is None:
         raise AppException(message="智能体未绑定聊天模型", code=status.HTTP_400_BAD_REQUEST)
 
-    from app.chat.base.skill_materializer import ensure_agent_skills_materialized
-
-    ensure_agent_skills_materialized(agent_id)
-
-    from app.chat.base.skill_materializer import get_agent_skill_ids
-
-    skill_ids = get_agent_skill_ids(agent_id)
-    cache_key = _single_chat_cache_key(agent_id, skill_ids)
-    compiled_graph = agent_map.get(cache_key)
-
-    if compiled_graph is None:
-        with _single_chat_agent_lock:
-            compiled_graph = agent_map.get(cache_key)
-            if compiled_graph is None:
-                with transactional_session() as session:
-                    model_info_service = ModelManageService(session)
-                    model_info = model_info_service.get_chat_model_info_by_model_id(
-                        int(agent_info['chat_model_id'])
-                    )
-                llm_model = DeepSeekChatOpenAI(
-                    model=model_info.model_name,
-                    base_url=model_info.base_url,
-                    api_key=model_info.api_key,
-                    stream_usage=True,
-                )
-                from app.chat.base.skill_materializer import build_skill_virtual_paths_for_agent
-
-                skill_sources = build_skill_virtual_paths_for_agent(agent_id)
-                compiled_graph = create_deep_agent(
-                    model=llm_model,
-                    system_prompt="",
-                    tools=[ask_user_question, FileParser(), web_search],
-                    skills=skill_sources or None,
-                    middleware=[wrap_dynamic_prompt],
-                    context_schema=SingleChatContext,
-                    checkpointer=get_checkpointer(),
-                    backend=make_project_backend,
-                )
-                agent_map[cache_key] = compiled_graph
+    compiled_graph = AgentRuntime.build(
+        AgentBuildConfig(
+            agent_id=agent_id,
+            chat_model_id=int(agent_info["chat_model_id"]),
+            checkpointer=get_checkpointer(),
+            middleware=[wrap_dynamic_prompt],
+            context_schema=SingleChatContext,
+            mode=AgentRuntimeMode.SINGLE,
+        )
+    )
 
     session_id = str(chat_round_info["session_id"])
     round_id = str(chat_round_info["round_id"])
