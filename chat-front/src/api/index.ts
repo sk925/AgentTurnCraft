@@ -1,8 +1,22 @@
 import axios, { type AxiosError } from 'axios';
 import type { NavigateFunction } from 'react-router-dom';
 
+function resolveApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.desktopConfig?.apiBaseUrl) {
+    return window.desktopConfig.apiBaseUrl;
+  }
+  return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
+}
+
+function resolveWsBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.desktopConfig?.wsBaseUrl) {
+    return window.desktopConfig.wsBaseUrl;
+  }
+  return import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000/api/chat/ws';
+}
+
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: resolveApiBaseUrl(),
 });
 
 const USER_SERVICE_TOKEN_KEY = 'user_service_access_token';
@@ -583,7 +597,9 @@ export type WSServerMessage =
 
 type WSEventCallback = (event: WSServerMessage) => void;
 
-const WS_BASE_URL = 'ws://localhost:8000/api/chat/ws';
+function getWsBaseUrl(): string {
+  return resolveWsBaseUrl();
+}
 const PING_INTERVAL = 30000; // 30s
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY = 1000; // 1s
@@ -654,7 +670,7 @@ export class ChatWebSocket {
 
     this.wsAuthenticated = false;
     this.authErrorNotified = false;
-    const socket = new WebSocket(WS_BASE_URL);
+    const socket = new WebSocket(getWsBaseUrl());
     this.ws = socket;
 
     socket.onopen = () => {

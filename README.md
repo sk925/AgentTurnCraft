@@ -47,7 +47,8 @@ agent-turncraft/
 │   ├── pyproject.toml
 │   └── .env.example
 ├── chat-front/              # 用户端（对话 + 智能体/技能/群组）
-└── admin-manage-front/      # 管理后台
+├── admin-manage-front/      # 管理后台
+└── mac-app/                 # macOS 桌面客户端（Electron）
 ```
 
 ## 技术栈
@@ -120,6 +121,16 @@ npm run dev
 ```
 
 默认端口：**5174**，已配置 `/api` 代理到 `http://localhost:8000`。
+
+### 5. macOS 桌面客户端（mac-app）
+
+```bash
+cd mac-app
+npm install
+npm run dev
+```
+
+详见 [`mac-app/README.md`](mac-app/README.md)。桌面端复用 `chat-front` 界面，需单独启动后端服务。
 
 ## 环境变量
 
