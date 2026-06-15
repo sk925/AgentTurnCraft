@@ -35,6 +35,9 @@ backend/Users/
 **/dist-ssr/
 **/*.local
 
+# macOS 桌面客户端（本地开发，不提交）
+mac-app/
+
 # 构建 / 缓存
 .cache/
 .turbo/
