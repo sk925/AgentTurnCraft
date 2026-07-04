@@ -43,3 +43,6 @@ mac-app/
 .turbo/
 coverage/
 *.tsbuildinfo
+
+/official-site/
+/docs/
