@@ -6,6 +6,7 @@ import {
   MessageOutlined,
   PlusOutlined,
   RobotOutlined,
+  DatabaseOutlined,
   TeamOutlined,
   ToolOutlined,
   UserOutlined,
@@ -15,6 +16,8 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from
 import LoginModal from './components/LoginModal';
 import { PortalSessionsProvider } from './PortalSessionsContext';
 import SkillsPage from './pages/Skills';
+import KnowledgeBasesPage from './pages/KnowledgeBases';
+import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetail';
 import AgentsPage from './pages/Agents';
 import AgentDetailPage from './pages/AgentDetail';
 import GroupsPage from './pages/Groups';
@@ -40,6 +43,7 @@ const { Sider, Content } = Layout;
 /** 侧栏路由 key → PermissionMenu 成员名（与后端 permission.code 一致） */
 const MENU_PATH_TO_PERMISSION: Record<string, string> = {
   '/skills': 'skill_management',
+  '/knowledge-bases': 'knowledge_management',
   '/agents': 'agent_management',
   '/groups': 'group_management',
   '/chat': 'chat',
@@ -52,6 +56,9 @@ function navSelectedKey(pathname: string): string {
   }
   if (pathname.startsWith('/agents')) {
     return '/agents';
+  }
+  if (pathname.startsWith('/knowledge-bases')) {
+    return '/knowledge-bases';
   }
   if (pathname === '/' || pathname.startsWith('/chat')) {
     return '/chat';
@@ -158,6 +165,7 @@ function AppLayout() {
   const menuItems = useMemo((): MenuProps['items'] => {
     const all: MenuProps['items'] = [
       { key: '/skills', icon: <ToolOutlined />, label: '技能' },
+      { key: '/knowledge-bases', icon: <DatabaseOutlined />, label: '知识库' },
       { key: '/agents', icon: <RobotOutlined />, label: '智能体' },
       { key: '/groups', icon: <UsergroupAddOutlined />, label: '群组' },
       { key: '/chat', icon: <MessageOutlined />, label: '对话' },
@@ -280,8 +288,8 @@ function AppLayout() {
   };
 
   const portalSessionsValue = useMemo(
-    () => ({ sessions, ready: sessionsReady }),
-    [sessions, sessionsReady],
+    () => ({ sessions, ready: sessionsReady, refreshSessions: loadSessions }),
+    [sessions, sessionsReady, loadSessions],
   );
 
   const sidebarSessions = useMemo(
@@ -315,7 +323,14 @@ function AppLayout() {
   return (
     <PortalSessionsProvider value={portalSessionsValue}>
       <Layout className="portal-shell" hasSider>
-      <Sider width={236} breakpoint="lg" collapsedWidth={0} className="portal-sider" theme="light">
+      <Sider
+        width={236}
+        breakpoint="lg"
+        collapsedWidth={0}
+        collapsible
+        className="portal-sider"
+        theme="light"
+      >
         <div className="portal-sider-brand" onClick={() => navigate('/chat')} role="presentation">
           <span className="portal-sider-brand__name">AgentTurnCraft</span>
           <span className="portal-sider-brand__sub">与 AI 轻松对话</span>
@@ -472,6 +487,8 @@ function AppLayout() {
         >
           <Routes>
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
+            <Route path="/knowledge-bases/:id" element={<KnowledgeBaseDetailPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id" element={<AgentDetailPage />} />
             <Route path="/groups" element={<GroupsPage />} />

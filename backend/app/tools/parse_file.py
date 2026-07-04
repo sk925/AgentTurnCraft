@@ -17,7 +17,10 @@ from langchain.tools import BaseTool, tool
 
 class FileParser(BaseTool):
     name: str = "parse_file"
-    description: str = "解析文件内容"
+    description: str = (
+        "解析用户上传的文件内容，支持 txt/md/csv/json/html/xml/docx/xlsx/pptx/pdf；"
+        "扫描版 PDF 会在文字层为空时自动 OCR 识别。"
+    )
 
     def _run(self, file_id: int,run_manager: CallbackManagerForToolRun | None = None) -> str:
         """解析文件内容"""
@@ -104,13 +107,9 @@ def _parse_csv(data: bytes) -> str:
 
 
 def _parse_pdf(data: bytes) -> str:
-    from pypdf import PdfReader
+    from app.utils.pdf_text import extract_pdf_full_text
 
-    reader = PdfReader(BytesIO(data))
-    parts: list[str] = []
-    for page in reader.pages:
-        parts.append(page.extract_text() or "")
-    return "\n".join(parts)
+    return extract_pdf_full_text(data)
 
 
 def _parse_docx(data: bytes) -> str:
@@ -259,6 +258,6 @@ def parse_file_by_id(file_id: int) -> str:
         return f"解析失败: {e}"
 
     if not text:
-        return "解析结果为空（可能为扫描版 PDF 或加密文档等）"
+        return "解析结果为空（可能为加密文档、纯图片文件，或 OCR 未能识别到文字）"
 
     return _truncate(text)

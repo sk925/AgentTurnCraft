@@ -43,3 +43,8 @@ mac-app/
 .turbo/
 coverage/
 *.tsbuildinfo
+
+# 本地站点与内部文档（不提交）
+official-site/
+docs/
+

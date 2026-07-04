@@ -20,6 +20,7 @@ class PermissionMenu(str, Enum):
 
     agent_management = "智能体"
     skill_management = "技能"
+    knowledge_management = "知识库"
     group_management = "群组"
     chat = "对话"
     group_chat = "群聊"

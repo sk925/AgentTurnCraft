@@ -197,7 +197,7 @@ export default function ModelProviderModelsPage() {
         style={{ marginTop: 8 }}
       />
 
-      <Modal title="添加聊天模型" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void submitCreate()} okText="添加" destroyOnClose>
+      <Modal title="添加模型" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void submitCreate()} okText="添加" destroyOnClose>
         <Form form={createForm} layout="vertical" style={{ marginTop: 8 }}>
           <Form.Item name="name" label="模型名称 / 调用名" rules={[{ required: true, message: '请填写名称' }]}>
             <Input placeholder="例如 gpt-4o-mini" />
@@ -213,7 +213,7 @@ export default function ModelProviderModelsPage() {
         </Form>
       </Modal>
 
-      <Modal title="编辑聊天模型" open={editOpen} onCancel={() => { setEditOpen(false); setEditing(null); }} onOk={() => void submitEdit()} okText="保存" destroyOnClose>
+      <Modal title="编辑模型" open={editOpen} onCancel={() => { setEditOpen(false); setEditing(null); }} onOk={() => void submitEdit()} okText="保存" destroyOnClose>
         <Form form={editForm} layout="vertical" style={{ marginTop: 8 }}>
           <Form.Item name="name" label="模型名称" rules={[{ required: true, message: '请填写名称' }]}>
             <Input />

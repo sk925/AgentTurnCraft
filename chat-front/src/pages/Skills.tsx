@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Button,
   Modal,
@@ -14,6 +14,7 @@ import {
   Input,
   Select,
   Tooltip,
+  Pagination,
 } from 'antd';
 import type { UploadFile } from 'antd';
 import {
@@ -32,6 +33,8 @@ const { Title, Paragraph } = Typography;
 
 const HOVER_DELAY_SEC = 0.5;
 const BUILTIN_TYPE = 1;
+const PAGE_SIZE = 12;
+const SEARCH_DEBOUNCE_MS = 300;
 
 type SkillTypeFilter = 'all' | 'custom' | 'builtin';
 
@@ -219,6 +222,8 @@ export default function SkillsPage() {
   const location = useLocation();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const [uploadForm] = Form.useForm<{ description: string }>();
@@ -228,24 +233,42 @@ export default function SkillsPage() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<SkillTypeFilter>('all');
 
-  const fetchSkills = async () => {
+  const fetchSkills = useCallback(async (targetPage: number) => {
     setLoading(true);
     try {
-      const data = await skillsApi.getAll();
-      setSkills(data);
+      const data = await skillsApi.list({
+        page: targetPage,
+        page_size: PAGE_SIZE,
+        q: searchQuery || undefined,
+        type: typeFilter,
+      });
+      setSkills(data.items);
+      setTotal(data.total);
+      if (data.total > 0 && data.items.length === 0 && targetPage > 1) {
+        setPage(targetPage - 1);
+      }
     } catch (error) {
       message.error(getBackendErrorMessage(error, '获取技能列表失败'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, typeFilter]);
 
   useEffect(() => {
-    void fetchSkills();
-  }, []);
+    const timer = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    void fetchSkills(page);
+  }, [page, fetchSkills]);
 
   const resetUploadModal = () => {
     uploadForm.resetFields();
@@ -284,7 +307,7 @@ export default function SkillsPage() {
       await skillsApi.upload(zipFile, description.trim());
       message.success('上传成功');
       closeUploadModal();
-      void fetchSkills();
+      void fetchSkills(page);
     } catch (error: unknown) {
       if ((error as { errorFields?: unknown })?.errorFields) {
         return;
@@ -330,7 +353,7 @@ export default function SkillsPage() {
       await skillsApi.update(editingSkill.id, { description: description.trim() });
       message.success('保存成功');
       closeEditModal();
-      void fetchSkills();
+      void fetchSkills(page);
     } catch (error: unknown) {
       if ((error as { errorFields?: unknown })?.errorFields) {
         return;
@@ -350,30 +373,18 @@ export default function SkillsPage() {
     try {
       await skillsApi.delete(id);
       message.success('删除成功');
-      void fetchSkills();
+      const nextPage = skills.length === 1 && page > 1 ? page - 1 : page;
+      if (nextPage !== page) {
+        setPage(nextPage);
+      } else {
+        void fetchSkills(page);
+      }
     } catch (error: unknown) {
       message.error(getBackendErrorMessage(error, '删除失败'));
     }
   };
 
-  const displaySkills = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return skills.filter((skill) => {
-      if (typeFilter === 'builtin' && skill.type !== BUILTIN_TYPE) {
-        return false;
-      }
-      if (typeFilter === 'custom' && skill.type === BUILTIN_TYPE) {
-        return false;
-      }
-      if (!q) {
-        return true;
-      }
-      const desc = resolveSkillDisplayDesc(skill).toLowerCase();
-      return skill.name.toLowerCase().includes(q) || desc.includes(q);
-    });
-  }, [skills, searchQuery, typeFilter]);
-
-  const isFiltering = searchQuery.trim().length > 0 || typeFilter !== 'all';
+  const isFiltering = searchQuery.length > 0 || typeFilter !== 'all';
 
   return (
     <div>
@@ -388,13 +399,16 @@ export default function SkillsPage() {
               allowClear
               prefix={<SearchOutlined style={{ color: 'var(--portal-muted)' }} />}
               placeholder="搜索技能名称/描述..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="portal-skills-toolbar__search"
             />
             <Select
               value={typeFilter}
-              onChange={setTypeFilter}
+              onChange={(value) => {
+                setTypeFilter(value);
+                setPage(1);
+              }}
               options={SKILL_TYPE_FILTER_OPTIONS}
               className="portal-skills-toolbar__filter"
             />
@@ -410,18 +424,29 @@ export default function SkillsPage() {
       </div>
 
       <Spin spinning={loading}>
-        {!loading && skills.length === 0 ? (
-          <Empty description="暂无技能，上传符合规范的 .zip 技能包" />
-        ) : !loading && displaySkills.length === 0 ? (
-          <Empty description={isFiltering ? '未找到匹配的技能' : '暂无技能'} />
+        {!loading && total === 0 ? (
+          <Empty description={isFiltering ? '未找到匹配的技能' : '暂无技能，上传符合规范的 .zip 技能包'} />
         ) : (
-          <Row gutter={[14, 14]} className="portal-skills-grid">
-            {displaySkills.map((skill) => (
-              <Col xs={24} sm={12} md={8} lg={6} xl={4} key={skill.id}>
-                <SkillCard skill={skill} onEdit={openEditModal} onDelete={handleDelete} />
-              </Col>
-            ))}
-          </Row>
+          <>
+            <Row gutter={[14, 14]} className="portal-skills-grid">
+              {skills.map((skill) => (
+                <Col xs={24} sm={12} md={8} lg={6} xl={4} key={skill.id}>
+                  <SkillCard skill={skill} onEdit={openEditModal} onDelete={handleDelete} />
+                </Col>
+              ))}
+            </Row>
+            {total > PAGE_SIZE && (
+              <div className="portal-skills-pagination">
+                <Pagination
+                  current={page}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                  showSizeChanger={false}
+                  onChange={(nextPage) => setPage(nextPage)}
+                />
+              </div>
+            )}
+          </>
         )}
       </Spin>
 

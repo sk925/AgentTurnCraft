@@ -16,7 +16,7 @@ from app.harness.cache import (
 )
 from app.harness.config import AgentRuntimeMode
 from app.harness.config import AgentBuildConfig
-from app.harness.tools import get_default_agent_tools
+from app.harness.tools import get_agent_tools
 from app.model_manage.model_manage_service import ModelManageService
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class AgentRuntime:
             compiled_graph = create_deep_agent(
                 model=llm_model,
                 system_prompt="",
-                tools=get_default_agent_tools(),
+                tools=get_agent_tools(config.agent_id),
                 skills=skill_sources or None,
                 middleware=list(config.middleware),
                 context_schema=config.context_schema,

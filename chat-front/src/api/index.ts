@@ -155,6 +155,32 @@ function ensureArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+export interface PaginatedData<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type SkillTypeFilter = 'all' | 'custom' | 'builtin';
+
+export interface SkillListParams {
+  page?: number;
+  page_size?: number;
+  q?: string;
+  type?: SkillTypeFilter;
+}
+
+function skillTypeToQuery(type?: SkillTypeFilter): number | undefined {
+  if (type === 'builtin') {
+    return 1;
+  }
+  if (type === 'custom') {
+    return 2;
+  }
+  return undefined;
+}
+
 export interface Skill {
   id: number;
   name: string;
@@ -164,6 +190,38 @@ export interface Skill {
   file_path: string | null;
   /** 1 内置（admin 创建） 2 自定义 */
   type?: number;
+  create_time: string;
+}
+
+export interface KnowledgeBaseBrief {
+  id: number;
+  name: string;
+  description: string | null;
+  embedding_model_id?: string | null;
+}
+
+export interface KnowledgeBase {
+  id: number;
+  name: string;
+  description: string | null;
+  embedding_model_id?: string | null;
+  embedding_dimension?: number;
+  /** 1 内置 2 自定义 */
+  type?: number;
+  create_time: string;
+}
+
+export type KnowledgeDocumentStatus = 'pending' | 'processing' | 'ready' | 'failed';
+
+export interface KnowledgeDocument {
+  id: number;
+  knowledge_base_id: number;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  status: KnowledgeDocumentStatus;
+  error_message?: string | null;
+  chunk_count: number;
   create_time: string;
 }
 
@@ -178,6 +236,7 @@ export interface Agent {
   /** 默认对话模型（base_chat_model.id，字符串避免大整数精度丢失） */
   chat_model_id?: string | null;
   skills?: Skill[];
+  knowledge_bases?: KnowledgeBaseBrief[];
 }
 
 /** 与后端 ChatModelResponse 对齐，用于智能体绑定模型下拉 */
@@ -424,8 +483,27 @@ function parseSSEChunk(chunk: string): ChatWindowEvent[] {
 }
 
 export const skillsApi = {
-  getAll: () =>
-    api.get<ApiResponse<Skill[]>>('/skills').then((res) => ensureArray<Skill>(res.data?.data)),
+  list: (params: SkillListParams = {}) => {
+    const { page = 1, page_size = 12, q, type } = params;
+    return api
+      .get<ApiResponse<PaginatedData<Skill>>>('/skills', {
+        params: {
+          page,
+          page_size,
+          ...(q ? { q } : {}),
+          ...(skillTypeToQuery(type) != null ? { type: skillTypeToQuery(type) } : {}),
+        },
+      })
+      .then((res) => {
+        const data = res.data?.data;
+        if (data && Array.isArray(data.items)) {
+          return data;
+        }
+        return { items: [] as Skill[], total: 0, page, page_size };
+      });
+  },
+  /** 拉取较多条目，供智能体详情等场景使用 */
+  getAll: () => skillsApi.list({ page: 1, page_size: 500 }).then((res) => res.items),
   upload: (file: File, description: string) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -446,6 +524,103 @@ export const modelManageApi = {
     api
       .get<ApiResponse<ChatModelOption[]>>('/model-manage/chat-models')
       .then((res) => ensureArray<ChatModelOption>(res.data?.data)),
+  listEmbeddingModels: () =>
+    modelManageApi.listChatModels().then((models) =>
+      models.filter((m) => String(m.model_type ?? '').toLowerCase() === 'embedding'),
+    ),
+};
+
+export interface KnowledgeBaseListParams {
+  page?: number;
+  page_size?: number;
+  q?: string;
+  type?: SkillTypeFilter;
+}
+
+export const knowledgeBasesApi = {
+  list: (params: KnowledgeBaseListParams = {}) => {
+    const { page = 1, page_size = 12, q, type } = params;
+    return api
+      .get<ApiResponse<PaginatedData<KnowledgeBase>>>('/knowledge-bases', {
+        params: {
+          page,
+          page_size,
+          ...(q ? { q } : {}),
+          ...(skillTypeToQuery(type) != null ? { type: skillTypeToQuery(type) } : {}),
+        },
+      })
+      .then((res) => {
+        const data = res.data?.data;
+        if (data && Array.isArray(data.items)) {
+          return data;
+        }
+        return { items: [] as KnowledgeBase[], total: 0, page, page_size };
+      });
+  },
+  /** 拉取较多条目，供智能体详情等场景使用 */
+  getAll: () => knowledgeBasesApi.list({ page: 1, page_size: 500 }).then((res) => res.items),
+  getById: (id: number) =>
+    api.get<ApiResponse<KnowledgeBase>>(`/knowledge-bases/${id}`).then((res) => res.data.data),
+  create: (data: { name: string; description?: string; embedding_model_id?: string | null }) =>
+    api.post<ApiResponse<KnowledgeBase>>('/knowledge-bases', data).then((res) => res.data.data),
+  update: (id: number, data: { name?: string; description?: string | null }) =>
+    api.put<ApiResponse<KnowledgeBase>>(`/knowledge-bases/${id}`, data).then((res) => res.data.data),
+  delete: (id: number) => api.delete(`/knowledge-bases/${id}`),
+  listDocuments: (knowledgeBaseId: number) =>
+    api
+      .get<ApiResponse<KnowledgeDocument[]>>(`/knowledge-bases/${knowledgeBaseId}/documents`)
+      .then((res) => ensureArray<KnowledgeDocument>(res.data?.data)),
+  uploadDocument: (knowledgeBaseId: number, file: File, embeddingModelId?: string | null) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (embeddingModelId) {
+      formData.append('embedding_model_id', embeddingModelId);
+    }
+    return api
+      .post<ApiResponse<KnowledgeDocument>>(`/knowledge-bases/${knowledgeBaseId}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((res) => res.data.data);
+  },
+  deleteDocument: (knowledgeBaseId: number, documentId: number) =>
+    api.delete(`/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`),
+  reindexDocument: (knowledgeBaseId: number, documentId: number) =>
+    api
+      .post<ApiResponse<KnowledgeDocument>>(
+        `/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/reindex`,
+        null,
+      )
+      .then((res) => res.data.data),
+  downloadDocument: async (knowledgeBaseId: number, documentId: number, fileName: string) => {
+    try {
+      const res = await api.get<Blob>(
+        `/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`,
+        { responseType: 'blob' },
+      );
+      const blob = res.data;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const axiosError = error as AxiosError<Blob>;
+      const blob = axiosError.response?.data;
+      if (blob instanceof Blob && blob.type.includes('json')) {
+        const text = await blob.text();
+        try {
+          const body = JSON.parse(text) as { message?: string; detail?: string };
+          throw new Error(extractBackendMessage(body) ?? '下载失败');
+        } catch (parseError) {
+          if (parseError instanceof Error && parseError.message !== '下载失败') {
+            throw parseError;
+          }
+        }
+      }
+      throw error;
+    }
+  },
 };
 
 export const agentsApi = {
@@ -458,6 +633,10 @@ export const agentsApi = {
   addSkill: (agentId: number, skillId: number) =>
     api.post(`/agents/${agentId}/skills/${skillId}`, null),
   removeSkill: (agentId: number, skillId: number) => api.delete(`/agents/${agentId}/skills/${skillId}`),
+  addKnowledgeBase: (agentId: number, knowledgeBaseId: number) =>
+    api.post(`/agents/${agentId}/knowledge-bases/${knowledgeBaseId}`, null),
+  removeKnowledgeBase: (agentId: number, knowledgeBaseId: number) =>
+    api.delete(`/agents/${agentId}/knowledge-bases/${knowledgeBaseId}`),
   getWithSkills: (id: number) => api.get<ApiResponse<Agent>>(`/agents/${id}`).then((res) => res.data.data),
 };
 

@@ -10,15 +10,53 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser
 from app.constants import RESOURCE_TYPE_BUILTIN
 from app.chat.base.models import Agent, Group, Skill
+from app.knowledge.models import KnowledgeBase
+
+
+def _skills_readable_query(session: Session, user: CurrentUser | None):
+    q = session.query(Skill)
+    if user is None:
+        return q.filter(Skill.resource_type == RESOURCE_TYPE_BUILTIN)
+    return q.filter(or_(Skill.user_id == user.id, Skill.resource_type == RESOURCE_TYPE_BUILTIN))
 
 
 def list_skills(session: Session, user: CurrentUser | None) -> list[Skill]:
-    q = session.query(Skill)
-    if user is None:
-        return q.filter(Skill.resource_type == RESOURCE_TYPE_BUILTIN).all()
-    return q.filter(
-        or_(Skill.user_id == user.id, Skill.resource_type == RESOURCE_TYPE_BUILTIN)
-    ).all()
+    return _skills_readable_query(session, user).order_by(Skill.create_time.desc()).all()
+
+
+def list_skills_page(
+    session: Session,
+    user: CurrentUser | None,
+    *,
+    page: int,
+    page_size: int,
+    q: str | None = None,
+    resource_type: int | None = None,
+) -> tuple[list[Skill], int]:
+    query = _skills_readable_query(session, user)
+
+    keyword = (q or "").strip()
+    if keyword:
+        pattern = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                Skill.name.ilike(pattern),
+                Skill.description.ilike(pattern),
+                Skill.skill_desc.ilike(pattern),
+            )
+        )
+
+    if resource_type is not None:
+        query = query.filter(Skill.resource_type == resource_type)
+
+    total = query.count()
+    items = (
+        query.order_by(Skill.create_time.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
 
 
 def get_skill_if_readable(session: Session, skill_id: int, user: CurrentUser | None) -> Skill | None:
@@ -69,4 +107,66 @@ def get_group_if_readable(session: Session, group_id: int, user: CurrentUser | N
         return g
     if user is not None and g.user_id == user.id:
         return g
+    return None
+
+
+def list_knowledge_bases(session: Session, user: CurrentUser | None) -> list[KnowledgeBase]:
+    return _knowledge_bases_readable_query(session, user).order_by(KnowledgeBase.create_time.desc()).all()
+
+
+def list_knowledge_bases_page(
+    session: Session,
+    user: CurrentUser | None,
+    *,
+    page: int,
+    page_size: int,
+    q: str | None = None,
+    resource_type: int | None = None,
+) -> tuple[list[KnowledgeBase], int]:
+    query = _knowledge_bases_readable_query(session, user)
+
+    keyword = (q or "").strip()
+    if keyword:
+        pattern = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                KnowledgeBase.name.ilike(pattern),
+                KnowledgeBase.description.ilike(pattern),
+            )
+        )
+
+    if resource_type is not None:
+        query = query.filter(KnowledgeBase.resource_type == resource_type)
+
+    total = query.count()
+    items = (
+        query.order_by(KnowledgeBase.create_time.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
+
+
+def _knowledge_bases_readable_query(session: Session, user: CurrentUser | None):
+    q = session.query(KnowledgeBase)
+    if user is None:
+        return q.filter(KnowledgeBase.resource_type == RESOURCE_TYPE_BUILTIN)
+    return q.filter(
+        or_(KnowledgeBase.user_id == user.id, KnowledgeBase.resource_type == RESOURCE_TYPE_BUILTIN)
+    )
+
+
+def get_knowledge_base_if_readable(
+    session: Session,
+    knowledge_base_id: int,
+    user: CurrentUser | None,
+) -> KnowledgeBase | None:
+    row = session.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base_id).first()
+    if row is None:
+        return None
+    if row.resource_type == RESOURCE_TYPE_BUILTIN:
+        return row
+    if user is not None and row.user_id == user.id:
+        return row
     return None
