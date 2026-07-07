@@ -531,7 +531,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [searchParams] = useSearchParams();
   const selectedSessionIdFromUrl = searchParams.get('session_id');
   const hasSelectedSession = Boolean(selectedSessionIdFromUrl);
-  const { sessions: portalSessions, ready: portalSessionsReady } = usePortalSessions();
+  const { sessions: portalSessions, ready: portalSessionsReady, refreshSessions } = usePortalSessions();
 
   const [orgId] = useState<number>(1);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -798,6 +798,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setRoundId(event.round_id);
         chatWebSocket.setSessionId(event.session_id);
         void refreshWorkspaceFiles(event.session_id);
+        void refreshSessions();
         if (searchParams.get('session_id') !== event.session_id) {
           navigate(
             {

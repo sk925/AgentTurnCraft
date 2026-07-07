@@ -17,6 +17,7 @@ import {
   FileTextOutlined,
   CloseOutlined,
   SettingOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -26,12 +27,14 @@ import {
   isUserLoggedIn,
   modelManageApi,
   skillsApi,
+  knowledgeBasesApi,
 } from '../api';
-import type { Agent, ChatModelOption, Skill } from '../api';
+import type { Agent, ChatModelOption, KnowledgeBase, Skill } from '../api';
 
 const BUILTIN_TYPE = 1;
+const MAX_AGENT_KNOWLEDGE_BASES = 3;
 
-type DetailTab = 'settings' | 'prompt' | 'model' | 'skills';
+type DetailTab = 'settings' | 'prompt' | 'model' | 'skills' | 'knowledge';
 
 function formatAgentDate(iso: string) {
   const d = new Date(iso);
@@ -49,6 +52,7 @@ export default function AgentDetailPage() {
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [loading, setLoading] = useState(!isCreateMode);
   const [creating, setCreating] = useState(false);
@@ -63,6 +67,9 @@ export default function AgentDetailPage() {
   const [addSkillModalOpen, setAddSkillModalOpen] = useState(false);
   const [addSkillSearch, setAddSkillSearch] = useState('');
   const [addingSkillId, setAddingSkillId] = useState<number | null>(null);
+  const [addKbModalOpen, setAddKbModalOpen] = useState(false);
+  const [addKbSearch, setAddKbSearch] = useState('');
+  const [addingKbId, setAddingKbId] = useState<number | null>(null);
 
   const fetchAgent = async () => {
     if (!Number.isFinite(agentId)) {
@@ -91,6 +98,15 @@ export default function AgentDetailPage() {
     }
   };
 
+  const fetchKnowledgeBases = async () => {
+    try {
+      const data = await knowledgeBasesApi.getAll();
+      setKnowledgeBases(data);
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '获取知识库列表失败'));
+    }
+  };
+
   const fetchChatModels = async () => {
     try {
       const data = await modelManageApi.listChatModels();
@@ -102,6 +118,7 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     void fetchSkills();
+    void fetchKnowledgeBases();
     void fetchChatModels();
   }, []);
 
@@ -154,6 +171,43 @@ export default function AgentDetailPage() {
       return s.name.toLowerCase().includes(q) || desc.includes(q);
     });
   }, [availableSkills, addSkillSearch]);
+
+  const agentKnowledgeBases = agent?.knowledge_bases ?? [];
+  const linkedKbIds = useMemo(() => new Set(agentKnowledgeBases.map((kb) => kb.id)), [agentKnowledgeBases]);
+  const linkedEmbeddingModelId =
+    agentKnowledgeBases.length > 0 ? agentKnowledgeBases[0].embedding_model_id ?? null : null;
+  const kbAtLimit = agentKnowledgeBases.length >= MAX_AGENT_KNOWLEDGE_BASES;
+
+  const availableKnowledgeBases = useMemo(
+    () =>
+      knowledgeBases.filter((kb) => {
+        if (linkedKbIds.has(kb.id)) {
+          return false;
+        }
+        if (kbAtLimit) {
+          return false;
+        }
+        if (!kb.embedding_model_id) {
+          return false;
+        }
+        if (linkedEmbeddingModelId && kb.embedding_model_id !== linkedEmbeddingModelId) {
+          return false;
+        }
+        return true;
+      }),
+    [knowledgeBases, linkedKbIds, kbAtLimit, linkedEmbeddingModelId],
+  );
+
+  const filteredAvailableKnowledgeBases = useMemo(() => {
+    const q = addKbSearch.trim().toLowerCase();
+    if (!q) {
+      return availableKnowledgeBases;
+    }
+    return availableKnowledgeBases.filter((kb) => {
+      const desc = (kb.description ?? '').toLowerCase();
+      return kb.name.toLowerCase().includes(q) || desc.includes(q);
+    });
+  }, [availableKnowledgeBases, addKbSearch]);
 
   const isBuiltin = !isCreateMode && agent?.type === BUILTIN_TYPE;
   const canManage = isUserLoggedIn() && (isCreateMode || !isBuiltin);
@@ -304,6 +358,46 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleAddKnowledgeBase = async (knowledgeBaseId: number) => {
+    if (!agent || !requireLogin()) {
+      return;
+    }
+    setAddingKbId(knowledgeBaseId);
+    try {
+      await agentsApi.addKnowledgeBase(agent.id, knowledgeBaseId);
+      message.success('关联成功');
+      void fetchAgent();
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '关联失败'));
+    } finally {
+      setAddingKbId(null);
+    }
+  };
+
+  const openAddKbModal = () => {
+    setAddKbSearch('');
+    setAddKbModalOpen(true);
+  };
+
+  const closeAddKbModal = () => {
+    setAddKbModalOpen(false);
+    setAddKbSearch('');
+    setAddingKbId(null);
+  };
+
+  const handleRemoveKnowledgeBase = async (knowledgeBaseId: number) => {
+    if (!agent || !requireLogin()) {
+      return;
+    }
+    try {
+      await agentsApi.removeKnowledgeBase(agent.id, knowledgeBaseId);
+      message.success('已解除关联');
+      void fetchAgent();
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '解除关联失败'));
+    }
+  };
+
   const modelLabel = modelDraft
     ? chatModelLabelById.get(modelDraft) ?? `ID ${modelDraft}`
     : '未配置';
@@ -340,12 +434,17 @@ export default function AgentDetailPage() {
               activeTab !== 'settings' &&
               activeTab !== 'prompt' &&
               activeTab !== 'skills' &&
+              activeTab !== 'knowledge' &&
               activeTab !== 'model'
                 ? ' portal-agent-detail__actions--hidden'
                 : ''
             }`}
             aria-hidden={
-              activeTab !== 'settings' && activeTab !== 'prompt' && activeTab !== 'skills' && activeTab !== 'model'
+              activeTab !== 'settings' &&
+              activeTab !== 'prompt' &&
+              activeTab !== 'skills' &&
+              activeTab !== 'knowledge' &&
+              activeTab !== 'model'
             }
           >
             {activeTab === 'settings' && (
@@ -403,6 +502,16 @@ export default function AgentDetailPage() {
                 关联新技能
               </Button>
             )}
+            {activeTab === 'knowledge' && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={availableKnowledgeBases.length === 0 || kbAtLimit}
+                onClick={openAddKbModal}
+              >
+                关联知识库
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -448,6 +557,15 @@ export default function AgentDetailPage() {
                       关联技能
                     </dt>
                     <dd className="portal-agent-detail__meta-value">{agentSkills.length} 个</dd>
+                  </div>
+                  <div className="portal-agent-detail__meta-row">
+                    <dt className="portal-agent-detail__meta-label">
+                      <DatabaseOutlined />
+                      关联知识库
+                    </dt>
+                    <dd className="portal-agent-detail__meta-value">
+                      {agentKnowledgeBases.length} / {MAX_AGENT_KNOWLEDGE_BASES}
+                    </dd>
                   </div>
                   <div className="portal-agent-detail__meta-row">
                     <dt className="portal-agent-detail__meta-label">
@@ -500,6 +618,18 @@ export default function AgentDetailPage() {
                     关联技能
                     {agentSkills.length > 0 && (
                       <span className="portal-agent-detail__tab-count">{agentSkills.length}</span>
+                    )}
+                  </button>
+                <button
+                  type="button"
+                  className={`portal-agent-detail__tab${activeTab === 'knowledge' ? ' is-active' : ''}`}
+                  aria-selected={activeTab === 'knowledge'}
+                  onClick={() => setActiveTab('knowledge')}
+                >
+                    <DatabaseOutlined />
+                    关联知识库
+                    {agentKnowledgeBases.length > 0 && (
+                      <span className="portal-agent-detail__tab-count">{agentKnowledgeBases.length}</span>
                     )}
                   </button>
                 </nav>
@@ -682,6 +812,85 @@ export default function AgentDetailPage() {
                       )}
                     </div>
                   )}
+                  {activeTab === 'knowledge' && (
+                    <div className="portal-agent-detail__skills-viewport">
+                      {isCreateMode ? (
+                        <div className="portal-agent-detail__empty-state">
+                          <DatabaseOutlined />
+                          <span>创建智能体后可关联知识库</span>
+                          <p className="portal-agent-detail__empty-hint">
+                            请先填写基础信息并点击右上角「创建智能体」
+                          </p>
+                        </div>
+                      ) : !canManage && agentKnowledgeBases.length === 0 ? (
+                        <div className="portal-agent-detail__empty-state">
+                          <DatabaseOutlined />
+                          <span>尚未关联任何知识库</span>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="portal-agent-detail__kb-hint">
+                            最多关联 {MAX_AGENT_KNOWLEDGE_BASES} 个知识库，且须使用相同 Embedding 模型。关联后对话时可调用
+                            search_knowledge 检索文档片段。
+                          </p>
+                          <ul className="portal-agent-detail__skills-grid">
+                            {agentKnowledgeBases.map((kb) => {
+                              const desc = kb.description?.trim() || '';
+                              return (
+                                <li key={kb.id} className="portal-agent-detail__skills-grid-item">
+                                  <article className="portal-agent-detail__skill-card portal-agent-detail__skill-card--kb">
+                                    {canManage && (
+                                      <button
+                                        type="button"
+                                        className="portal-agent-detail__skill-card-remove"
+                                        aria-label={`解除关联 ${kb.name}`}
+                                        onClick={() => void handleRemoveKnowledgeBase(kb.id)}
+                                      >
+                                        <CloseOutlined />
+                                      </button>
+                                    )}
+                                    <div className="portal-agent-detail__skill-card-icon" aria-hidden>
+                                      <DatabaseOutlined />
+                                    </div>
+                                    <h3 className="portal-agent-detail__skill-card-name">{kb.name}</h3>
+                                    <p
+                                      className={`portal-agent-detail__skill-card-desc${
+                                        desc ? '' : ' is-empty'
+                                      }`}
+                                    >
+                                      {desc || '暂无描述'}
+                                    </p>
+                                  </article>
+                                </li>
+                              );
+                            })}
+                            {canManage && !kbAtLimit && (
+                              <li className="portal-agent-detail__skills-grid-item">
+                                <button
+                                  type="button"
+                                  className="portal-agent-detail__skill-card portal-agent-detail__skill-card--add"
+                                  disabled={availableKnowledgeBases.length === 0}
+                                  onClick={openAddKbModal}
+                                >
+                                  <span className="portal-agent-detail__skill-card-add-icon" aria-hidden>
+                                    <PlusOutlined />
+                                  </span>
+                                  <span className="portal-agent-detail__skill-card-add-title">关联知识库</span>
+                                  <span className="portal-agent-detail__skill-card-add-hint">
+                                    {availableKnowledgeBases.length > 0
+                                      ? `${availableKnowledgeBases.length} 个可关联`
+                                      : linkedEmbeddingModelId
+                                        ? '无相同 Embedding 的可选库'
+                                        : '请先创建并完成文档索引的知识库'}
+                                  </span>
+                                </button>
+                              </li>
+                            )}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </main>
             </div>
@@ -728,6 +937,63 @@ export default function AgentDetailPage() {
                   </span>
                   <span className="portal-agent-detail__add-skill-item-body">
                     <span className="portal-agent-detail__add-skill-item-name">{skill.name}</span>
+                    <span className="portal-agent-detail__add-skill-item-desc">{desc}</span>
+                  </span>
+                  <span className="portal-agent-detail__add-skill-item-action">
+                    {isAdding ? <Spin size="small" /> : <PlusOutlined />}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="关联知识库"
+        open={addKbModalOpen}
+        onCancel={closeAddKbModal}
+        footer={null}
+        width={520}
+        destroyOnClose
+        className="portal-agent-detail__add-skill-modal"
+      >
+        <Input
+          allowClear
+          placeholder="搜索知识库名称或描述"
+          value={addKbSearch}
+          onChange={(e) => setAddKbSearch(e.target.value)}
+          className="portal-agent-detail__add-skill-search"
+        />
+        <div className="portal-agent-detail__add-skill-list" role="list">
+          {filteredAvailableKnowledgeBases.length === 0 ? (
+            <div className="portal-agent-detail__add-skill-empty">
+              {availableKnowledgeBases.length === 0
+                ? kbAtLimit
+                  ? `已达上限（${MAX_AGENT_KNOWLEDGE_BASES} 个）`
+                  : linkedEmbeddingModelId
+                    ? '无相同 Embedding 模型的可选知识库'
+                    : '暂无可关联的知识库（须已配置 Embedding 并完成文档索引）'
+                : '未找到匹配的知识库'}
+            </div>
+          ) : (
+            filteredAvailableKnowledgeBases.map((kb) => {
+              const desc = kb.description?.trim() || '暂无描述';
+              const isAdding = addingKbId === kb.id;
+              return (
+                <button
+                  key={kb.id}
+                  type="button"
+                  role="listitem"
+                  className="portal-agent-detail__add-skill-item"
+                  disabled={isAdding || addingKbId !== null}
+                  onClick={() => void handleAddKnowledgeBase(kb.id)}
+                >
+                  <span className="portal-agent-detail__add-skill-item-icon" aria-hidden>
+                    <DatabaseOutlined />
+                  </span>
+                  <span className="portal-agent-detail__add-skill-item-body">
+                    <span className="portal-agent-detail__add-skill-item-name">{kb.name}</span>
                     <span className="portal-agent-detail__add-skill-item-desc">{desc}</span>
                   </span>
                   <span className="portal-agent-detail__add-skill-item-action">

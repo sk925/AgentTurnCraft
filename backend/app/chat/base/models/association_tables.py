@@ -24,3 +24,13 @@ group_agent = Table(
     Column("create_time", DateTime, server_default=func.now()),
     extend_existing=True,
 )
+
+knowledge_base_agent = Table(
+    "knowledge_base_agent",
+    Base.metadata,
+    Column("id", Integer, primary_key=True),
+    Column("knowledge_base_id", Integer, ForeignKey("knowledge_base.id", ondelete="CASCADE")),
+    Column("agent_id", Integer, ForeignKey("agent.id", ondelete="CASCADE")),
+    Column("create_time", DateTime, server_default=func.now()),
+    extend_existing=True,
+)

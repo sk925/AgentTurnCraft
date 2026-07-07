@@ -1,5 +1,5 @@
 from typing import TypedDict
-from app.chat.base.models.association_tables import group_agent, skill_agent
+from app.chat.base.models.association_tables import group_agent, knowledge_base_agent, skill_agent
 from app.database import Base, transactional_session
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -19,6 +19,7 @@ class Agent(Base):
     chat_model_id = Column(BigInteger, nullable=True)
 
     skills = relationship("Skill", secondary=skill_agent, back_populates="agents")
+    knowledge_bases = relationship("KnowledgeBase", secondary=knowledge_base_agent, back_populates="agents")
 
 
 Agent.groups = relationship("Group", secondary=group_agent, back_populates="agents")

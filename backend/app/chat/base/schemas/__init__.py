@@ -16,6 +16,13 @@ def success_response(data: T | None = None, message: str = "ok") -> ApiResponse[
     return ApiResponse[T](code=0, message=message, data=data)
 
 
+class PaginatedData(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    page: int
+    page_size: int
+
+
 def api_error_dict(*, code: int, message: str) -> dict:
     """与 ApiResponse 字段一致，供异常处理器 JSON 返回（非 0 的 code 表示失败）。"""
     return {"code": code, "message": message, "data": None}
@@ -103,6 +110,26 @@ class AgentResponse(AgentBase):
 
 class AgentWithSkills(AgentResponse):
     skills: list[SkillResponse] = []
+
+
+class KnowledgeBaseBrief(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    embedding_model_id: str | None = None
+
+    @field_validator("embedding_model_id", mode="before")
+    @classmethod
+    def _embedding_model_id_resp(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        return str(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentWithSkillsAndKnowledgeBases(AgentWithSkills):
+    knowledge_bases: list[KnowledgeBaseBrief] = []
 
 
 class GroupBase(BaseModel):

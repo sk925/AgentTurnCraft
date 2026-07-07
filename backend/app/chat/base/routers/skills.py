@@ -1,8 +1,8 @@
 import logging
 import re
-from typing import Annotated, List
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from minio.error import S3Error
 from sqlalchemy.orm import Session
 
@@ -16,8 +16,8 @@ from app.config import settings
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.database import get_db
 from app.chat.base.models import Skill
-from app.chat.base.schemas import ApiResponse, SkillResponse, SkillUpdate, success_response
-from app.query_access import list_skills
+from app.chat.base.schemas import ApiResponse, PaginatedData, SkillResponse, SkillUpdate, success_response
+from app.query_access import list_skills_page
 from app.utils.minio_storage import remove_object, upload_bytes
 
 logger = logging.getLogger(__name__)
@@ -27,14 +27,35 @@ router = APIRouter()
 _MAX_SKILL_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MiB
 
 
-@router.get("/skills", response_model=ApiResponse[List[SkillResponse]])
+@router.get("/skills", response_model=ApiResponse[PaginatedData[SkillResponse]])
 def get_skills(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 12,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    type: Annotated[int | None, Query(ge=1, le=2, description="1 内置 2 自定义")] = None,
 ):
-    """获取技能列表（须登录：内置 + 当前用户自己的自定义）"""
-    skills = list_skills(db, current_user)
-    return success_response(skills)
+    """分页获取技能列表（须登录：内置 + 当前用户自己的自定义）。"""
+    if type is not None and type not in (RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM):
+        raise HTTPException(status_code=400, detail="无效的技能类型筛选")
+
+    items, total = list_skills_page(
+        db,
+        current_user,
+        page=page,
+        page_size=page_size,
+        q=q,
+        resource_type=type,
+    )
+    return success_response(
+        PaginatedData[SkillResponse](
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
 
 
 @router.post("/skills", response_model=ApiResponse[SkillResponse])

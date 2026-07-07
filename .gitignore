@@ -28,7 +28,6 @@ logs/
 backend/workspace/
 backend/.uploads/
 backend/Users/
-# 注意：backend/app/**/workspace 为源码包，不要忽略
 
 # Node（前端）
 **/node_modules/
@@ -45,5 +44,7 @@ mac-app/
 coverage/
 *.tsbuildinfo
 
-/official-site/
-/docs/
+# 本地站点与内部文档（不提交）
+official-site/
+docs/
+

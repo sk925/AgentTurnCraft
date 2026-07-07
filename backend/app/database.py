@@ -244,6 +244,140 @@ def _ensure_chat_session_postgres_types() -> None:
             )
 
 
+def _ensure_pgvector_extension() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+
+def _ensure_knowledge_base_embedding_dimension() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE knowledge_base
+                ADD COLUMN IF NOT EXISTS embedding_dimension INTEGER NOT NULL DEFAULT 1536
+                """
+            )
+        )
+
+
+def _ensure_knowledge_chunk_embedding_dimension() -> None:
+    """将 knowledge_chunk.embedding 列维度与 DEFAULT_EMBEDDING_DIMENSION 对齐。"""
+    if engine.dialect.name != "postgresql":
+        return
+    from app.knowledge.constants import DEFAULT_EMBEDDING_DIMENSION
+    from sqlalchemy import text
+
+    target_dim = DEFAULT_EMBEDDING_DIMENSION
+    with engine.begin() as conn:
+        exists = conn.execute(
+            text(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'knowledge_chunk'
+                """
+            )
+        ).fetchone()
+        if exists is None:
+            return
+
+        type_row = conn.execute(
+            text(
+                """
+                SELECT format_type(a.atttypid, a.atttypmod) AS col_type
+                FROM pg_attribute a
+                JOIN pg_class c ON a.attrelid = c.oid
+                JOIN pg_namespace n ON c.relnamespace = n.oid
+                WHERE n.nspname = 'public'
+                  AND c.relname = 'knowledge_chunk'
+                  AND a.attname = 'embedding'
+                  AND NOT a.attisdropped
+                """
+            )
+        ).fetchone()
+        current_type = type_row[0] if type_row else ""
+        expected_type = f"vector({target_dim})"
+        if current_type == expected_type:
+            conn.execute(
+                text(
+                    """
+                    UPDATE knowledge_base
+                    SET embedding_dimension = :dim
+                    WHERE embedding_dimension <> :dim
+                    """
+                ),
+                {"dim": target_dim},
+            )
+            return
+
+        conn.execute(text("DROP INDEX IF EXISTS ix_knowledge_chunk_embedding"))
+        conn.execute(text("DELETE FROM knowledge_chunk"))
+        conn.execute(
+            text(
+                """
+                UPDATE knowledge_document
+                SET status = 'failed',
+                    error_message = '向量维度已变更，请在知识库详情中重新索引',
+                    chunk_count = 0
+                WHERE status = 'ready'
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                ALTER TABLE knowledge_chunk
+                ALTER COLUMN embedding TYPE vector({target_dim})
+                USING embedding::vector({target_dim})
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE knowledge_base
+                SET embedding_dimension = :dim
+                WHERE embedding_dimension <> :dim
+                """
+            ),
+            {"dim": target_dim},
+        )
+
+
+def _ensure_knowledge_chunk_vector_index() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        exists = conn.execute(
+            text(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'knowledge_chunk'
+                """
+            )
+        ).fetchone()
+        if exists is None:
+            return
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_knowledge_chunk_embedding
+                ON knowledge_chunk USING hnsw (embedding vector_cosine_ops)
+                """
+            )
+        )
+
+
 def init_db():
     from app.manage import models as _manage_models  # noqa: F401
     from app.manage.models import user_login as _manage_user_login  # noqa: F401
@@ -251,8 +385,15 @@ def init_db():
     from app.chat.base.models import agent_log as _agent_log  # noqa: F401
     from app.chat.base.models import upload_file as _upload_file  # noqa: F401
     import app.chat.session.models as _session_models  # noqa: F401
+    import app.knowledge.models.knowledge_base_model as _knowledge_base  # noqa: F401
+    import app.knowledge.models.knowledge_document_model as _knowledge_document  # noqa: F401
+    import app.knowledge.models.knowledge_chunk_model as _knowledge_chunk  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_pgvector_extension()
+    _ensure_knowledge_base_embedding_dimension()
+    _ensure_knowledge_chunk_embedding_dimension()
+    _ensure_knowledge_chunk_vector_index()
     _ensure_resource_type_columns()
     _ensure_manage_role_permission_type_columns()
     _ensure_manage_ids_bigint_postgres()

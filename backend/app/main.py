@@ -31,6 +31,8 @@ from app.manage.login_session import delete_expired_user_login_rows
 from app.chat.base.routers import agents, groups, skills
 from app.chat.base.routers.upload_file_router import upload_file_router
 from app.model_manage.model_manage_router import model_manage_router
+from app.knowledge.routers import documents as knowledge_documents_router
+from app.knowledge.routers import knowledge_bases as knowledge_bases_router
 
 
 @asynccontextmanager
@@ -103,6 +105,8 @@ app.include_router(manage_users.router, prefix="/api", tags=["users"])
 app.include_router(manage_roles.router, prefix="/api", tags=["roles"])
 app.include_router(manage_permissions.router, prefix="/api", tags=["permissions"])
 app.include_router(model_manage_router, prefix="/api", tags=["model-manage"])
+app.include_router(knowledge_bases_router.router, prefix="/api", tags=["knowledge-bases"])
+app.include_router(knowledge_documents_router.router, prefix="/api", tags=["knowledge-documents"])
 
 
 @app.get("/scalar", include_in_schema=False)

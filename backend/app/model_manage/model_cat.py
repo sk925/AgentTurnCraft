@@ -10,6 +10,7 @@ from app.utils.snowflake import get_snowflake_id
 
 class ModelType(str,Enum):
     TEXT_GENERATION = "text_generation"
+    EMBEDDING = "embedding"
     IMAGE_GENERATION = "image_generation"
     AUDIO_GENERATION = "audio_generation"
     VIDEO_GENERATION = "video_generation"

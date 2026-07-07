@@ -46,16 +46,27 @@ BASE_RULE = """
 - 遵守法律法规，拒绝违法、色情、暴力、敏感、危险内容；禁止传播虚假信息、谣言、非法内容。
 
 ### 询问规则
-下列情况时必须 ask_user_question工具：
+下列情况时必须 ask_user_question 工具：
 - 需要用户审核
 - 用户意图不明确，需要向用户收集信息
 - 询问用户问题
+
+{knowledge_base_rule}
 
 ### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则: /workspace/member_id/session_id/round_id)
 {output_dir}
 
 </base_rule>
 """
+
+KNOWLEDGE_BASE_RULE = """
+### 知识库检索（优先于向用户索要文件）
+- 你已关联企业知识库，其中可能包含合同、制度、手册、产品说明等文档。
+- 当用户询问「合同写了什么」「文档内容」「制度规定」等事实性问题时，必须先调用 search_knowledge 检索，不得要求用户重新上传已在知识库中的文件。
+- 仅当 search_knowledge 明确返回未检索到相关内容时，才可告知用户知识库中暂无信息。
+"""
+
+KNOWLEDGE_BASE_RULE_EMPTY = ""
 
 FRAMEQORK_SETTING = """
 <framework_setting>
@@ -75,6 +86,7 @@ class SingleChatContext(TypedDict, total=False):
     round_id: str
     user_id: int
     user_custom_prompt: str
+    has_knowledge_bases: bool
 
 @dynamic_prompt
 def wrap_dynamic_prompt(request: ModelRequest) -> str:
@@ -84,7 +96,8 @@ def wrap_dynamic_prompt(request: ModelRequest) -> str:
     session_id = ctx.get("session_id", "")
     round_id = ctx.get("round_id", "")
     output_dir = f"{artifact_dir}/{member_id}/{session_id}/{round_id}"
-    base_rule_prompt = BASE_RULE.format(output_dir=output_dir)
+    knowledge_base_rule = KNOWLEDGE_BASE_RULE if ctx.get("has_knowledge_bases") else KNOWLEDGE_BASE_RULE_EMPTY
+    base_rule_prompt = BASE_RULE.format(output_dir=output_dir, knowledge_base_rule=knowledge_base_rule)
     frame_setting = FRAMEQORK_SETTING.format(frame_setting=deep_agent_prompt)
     user_custom_prompt = USER_CUSTOM_PROMPT.format(
         user_custom_prompt=ctx.get("user_custom_prompt", "") or ""
@@ -115,6 +128,14 @@ def _resolve_agent_id(agent_id: int | None) -> int:
     if agent_id is not None:
         return int(agent_id)
     return int(settings.default_single_agent_id)
+
+
+def _agent_has_knowledge_bases(agent_id: int) -> bool:
+    from app.database import transactional_session
+    from app.knowledge.agent_scope import get_agent_knowledge_scope
+
+    with transactional_session() as db:
+        return get_agent_knowledge_scope(db, agent_id) is not None
 
 
 async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: EventPublisher) -> bool:
@@ -152,6 +173,7 @@ async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: Even
         "round_id": round_id,
         "user_id": user_id,
         "user_custom_prompt": agent_info['prompt'] or "",
+        "has_knowledge_bases": _agent_has_knowledge_bases(agent_id),
     }
 
     current_speaker = {

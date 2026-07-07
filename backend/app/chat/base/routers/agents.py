@@ -16,9 +16,12 @@ from app.chat.base.schemas import (
     AgentResponse,
     AgentUpdate,
     AgentWithSkills,
+    AgentWithSkillsAndKnowledgeBases,
     ApiResponse,
     success_response,
 )
+from app.knowledge.binding import validate_agent_knowledge_base_binding
+from app.query_access import get_knowledge_base_if_readable
 
 router = APIRouter()
 
@@ -179,14 +182,76 @@ def remove_skill_from_agent(
     return success_response({"unlinked": True}, message="解除关联成功")
 
 
-@router.get("/agents/{agent_id}", response_model=ApiResponse[AgentWithSkills])
+@router.get("/agents/{agent_id}", response_model=ApiResponse[AgentWithSkillsAndKnowledgeBases])
 def get_agent_with_skills(
     agent_id: int,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ):
-    """获取智能体及其关联的技能（须登录：仅可访问内置或本人数据）"""
+    """获取智能体及其关联的技能、知识库（须登录：仅可访问内置或本人数据）"""
     agent = get_agent_if_readable(db, agent_id, current_user)
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
     return success_response(agent)
+
+
+@router.post("/agents/{agent_id}/knowledge-bases/{knowledge_base_id}")
+def add_knowledge_base_to_agent(
+    agent_id: int,
+    knowledge_base_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    db: Session = Depends(get_db),
+):
+    """关联知识库到智能体（同 Embedding 模型，最多 3 个）。"""
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权关联知识库：仅创建人可关联知识库")
+
+    knowledge_base = get_knowledge_base_if_readable(db, knowledge_base_id, current_user)
+    if not knowledge_base:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    already_linked = knowledge_base in agent.knowledge_bases
+    validate_agent_knowledge_base_binding(
+        agent=agent,
+        knowledge_base=knowledge_base,
+        already_linked=already_linked,
+    )
+
+    if already_linked:
+        return success_response({"linked": True}, message="关联成功")
+
+    agent.knowledge_bases.append(knowledge_base)
+    db.commit()
+    from app.harness import evict_agent_runtime_cache_for_agent_ids
+
+    evict_agent_runtime_cache_for_agent_ids([agent_id])
+    return success_response({"linked": True}, message="关联成功")
+
+
+@router.delete("/agents/{agent_id}/knowledge-bases/{knowledge_base_id}")
+def remove_knowledge_base_from_agent(
+    agent_id: int,
+    knowledge_base_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    db: Session = Depends(get_db),
+):
+    """解除知识库与智能体的关联。"""
+    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+
+    knowledge_base = get_knowledge_base_if_readable(db, knowledge_base_id, current_user)
+    if not knowledge_base:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    if knowledge_base in agent.knowledge_bases:
+        agent.knowledge_bases.remove(knowledge_base)
+        db.commit()
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
+
+        evict_agent_runtime_cache_for_agent_ids([agent_id])
+
+    return success_response({"unlinked": True}, message="解除关联成功")

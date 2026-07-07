@@ -36,5 +36,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
+    # 扫描版 PDF：文字层为空时用 OCR 回退
+    pdf_ocr_enabled: bool = True
+    pdf_ocr_max_pages: int = 30
+    pdf_ocr_render_scale: float = 2.0
+
 
 settings = Settings()
