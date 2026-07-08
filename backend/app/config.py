@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     default_single_agent_id: int
 
+    # 开放单聊（Android 等第三方，免 JWT）
+    public_chat_enabled: bool = True
+    public_chat_api_key: str = "111"
+    public_chat_user_id: int = 1
+
     # 日志：development=可读文本；production=JSON 行输出到 stdout
     app_env: str = "development"
     log_level: str = "INFO"

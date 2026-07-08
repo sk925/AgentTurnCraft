@@ -482,6 +482,26 @@ function parseSSEChunk(chunk: string): ChatWindowEvent[] {
   return events;
 }
 
+const LIST_PAGE_SIZE_MAX = 100;
+
+async function fetchAllPaginatedItems<T, P extends { page?: number; page_size?: number }>(
+  listFn: (params: P) => Promise<PaginatedData<T>>,
+  params: Omit<P, 'page' | 'page_size'> = {} as Omit<P, 'page' | 'page_size'>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let page = 1;
+  let total = 0;
+
+  do {
+    const res = await listFn({ ...params, page, page_size: LIST_PAGE_SIZE_MAX } as P);
+    items.push(...res.items);
+    total = res.total;
+    page += 1;
+  } while (items.length < total);
+
+  return items;
+}
+
 export const skillsApi = {
   list: (params: SkillListParams = {}) => {
     const { page = 1, page_size = 12, q, type } = params;
@@ -502,8 +522,8 @@ export const skillsApi = {
         return { items: [] as Skill[], total: 0, page, page_size };
       });
   },
-  /** 拉取较多条目，供智能体详情等场景使用 */
-  getAll: () => skillsApi.list({ page: 1, page_size: 500 }).then((res) => res.items),
+  /** 拉取全部条目（分页请求，每页最多 100 条） */
+  getAll: () => fetchAllPaginatedItems(skillsApi.list),
   upload: (file: File, description: string) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -557,8 +577,8 @@ export const knowledgeBasesApi = {
         return { items: [] as KnowledgeBase[], total: 0, page, page_size };
       });
   },
-  /** 拉取较多条目，供智能体详情等场景使用 */
-  getAll: () => knowledgeBasesApi.list({ page: 1, page_size: 500 }).then((res) => res.items),
+  /** 拉取全部条目（分页请求，每页最多 100 条） */
+  getAll: () => fetchAllPaginatedItems(knowledgeBasesApi.list),
   getById: (id: number) =>
     api.get<ApiResponse<KnowledgeBase>>(`/knowledge-bases/${id}`).then((res) => res.data.data),
   create: (data: { name: string; description?: string; embedding_model_id?: string | null }) =>

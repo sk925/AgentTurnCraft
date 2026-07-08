@@ -47,4 +47,6 @@ coverage/
 # 本地站点与内部文档（不提交）
 official-site/
 docs/
+recipe_corpus_full.json
+recipe_corpus_sample_5000.txt
 

@@ -60,10 +60,10 @@ BASE_RULE = """
 """
 
 KNOWLEDGE_BASE_RULE = """
-### 知识库检索（优先于向用户索要文件）
-- 你已关联企业知识库，其中可能包含合同、制度、手册、产品说明等文档。
-- 当用户询问「合同写了什么」「文档内容」「制度规定」等事实性问题时，必须先调用 search_knowledge 检索，不得要求用户重新上传已在知识库中的文件。
-- 仅当 search_knowledge 明确返回未检索到相关内容时，才可告知用户知识库中暂无信息。
+### 知识库检索（绑定了知识库时必须遵守）
+- 你已关联知识库，回答与用户问题相关的事实性内容前，必须先调用 search_knowledge 检索。
+- 不得在未检索前凭记忆编造，也不得要求用户重新上传已在库中的文档。
+- 仅当 search_knowledge 明确返回未检索到相关内容时，才可说明知识库中暂无信息。
 """
 
 KNOWLEDGE_BASE_RULE_EMPTY = ""
@@ -97,6 +97,7 @@ def wrap_dynamic_prompt(request: ModelRequest) -> str:
     round_id = ctx.get("round_id", "")
     output_dir = f"{artifact_dir}/{member_id}/{session_id}/{round_id}"
     knowledge_base_rule = KNOWLEDGE_BASE_RULE if ctx.get("has_knowledge_bases") else KNOWLEDGE_BASE_RULE_EMPTY
+    search_rule = "### 优先使用 search_knowledge 工具从知识库查询" if ctx.get("has_knowledge_bases") else ""
     base_rule_prompt = BASE_RULE.format(output_dir=output_dir, knowledge_base_rule=knowledge_base_rule)
     frame_setting = FRAMEQORK_SETTING.format(frame_setting=deep_agent_prompt)
     user_custom_prompt = USER_CUSTOM_PROMPT.format(
@@ -118,7 +119,6 @@ class ChatRountInfo(TypedDict, total=False):
 
 def get_agent_info(agent_id: int) -> Agent:
     agent = AgentService.get_agent_info_by_id(agent_id)
-    logger.info("get_agent_info: %s", agent)
     if agent is None:
         raise AppException(message="Agent not found", code=status.HTTP_404_NOT_FOUND)
     return agent
@@ -143,7 +143,6 @@ async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: Even
 
     返回 True 表示因 ask_user_question 中断而暂停，等待前端 resume。
     """
-    logger.info("chat_with_single_agent: %s", chat_round_info)
 
     agent_id = _resolve_agent_id(chat_round_info.get("agent_id"))
     agent_info = get_agent_info(agent_id)

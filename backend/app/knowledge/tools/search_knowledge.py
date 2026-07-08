@@ -18,10 +18,11 @@ def build_search_knowledge_tool(agent_id: int):
     @tool("search_knowledge", args_schema=SearchKnowledgeInput)
     def search_knowledge(query: str) -> str:
         """从智能体关联的企业知识库中检索与问题相关的文档片段。
-
+    
         当用户询问合同内容、制度条款、产品说明、流程规范等可能已入库文档中的事实性问题时，必须优先调用本工具；
         不得在未检索前要求用户上传文件。
         """
+        print("search_knowledge", query)
         with transactional_session() as db:
             scope = get_agent_knowledge_scope(db, agent_id)
             if scope is None:

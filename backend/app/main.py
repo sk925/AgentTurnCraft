@@ -9,6 +9,7 @@ configure_logging()
 
 from app.exceptions import register_exception_handler
 from app.chat.chat_router import router as chat_router
+from app.chat.open_chat_router import router as open_chat_router
 from app.chat.shared.checkpointer import set_checkpointer, set_sub_checkpointer
 from app.redis_client import init_redis, close_redis
 from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
@@ -98,6 +99,7 @@ app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(groups.router, prefix="/api", tags=["groups"])
 app.include_router(upload_file_router, prefix="/api")
 app.include_router(chat_router, prefix="/api", tags=["chat"])
+app.include_router(open_chat_router, prefix="/api", tags=["open-chat"])
 app.include_router(workspace_files.router, prefix="/api", tags=["workspace_files"])
 app.include_router(session_router, prefix="/api", tags=["sessions"])
 app.include_router(manage_auth.router, prefix="/api/auth", tags=["auth"])

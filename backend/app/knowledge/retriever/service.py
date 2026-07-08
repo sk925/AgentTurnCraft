@@ -119,4 +119,6 @@ def format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
                 ]
             )
         )
-    return "\n\n".join(parts)
+    result=  "\n\n".join(parts)
+    print(result)
+    return result
