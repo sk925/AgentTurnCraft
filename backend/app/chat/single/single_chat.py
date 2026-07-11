@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 from app.chat.base.models import Agent, AgentService
 from app.chat.shared.checkpointer import get_checkpointer
 from app.chat.shared.event_publisher import EventPublisher
+from app.chat.shared.session_summary import schedule_compact_after_round
 from app.chat.shared.streaming import stream_messages, stream_updates
 from app.config import settings
 from app.exceptions import AppException
@@ -250,4 +251,6 @@ async def chat_with_single_agent(chat_round_info: ChatRountInfo, publisher: Even
             "finish_reason": "completed",
         },
     )
+    # 不阻塞收尾：后台延迟压缩，避免与 astream 共用 checkpointer 锁/连接
+    schedule_compact_after_round(compiled_graph, config, session_id)
     return False

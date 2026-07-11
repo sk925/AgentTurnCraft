@@ -1,6 +1,4 @@
-import time
-from typing import Text
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Integer, String
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -16,5 +14,6 @@ class ChatSession(Base):
     create_at = Column(DateTime, server_default=func.now(), nullable=False)
     token_use = Column(Integer, nullable=True)
     session_type = Column(String(64), nullable=False, default=SessionType.CHAT.value)
+    summary = Column(Text, nullable=True)
 
 

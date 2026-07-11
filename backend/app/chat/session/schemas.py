@@ -10,6 +10,7 @@ class ChatSessionResponse(BaseModel):
     create_at: datetime
     token_use: int | None = None
     session_type: str
+    summary: str | None = None
 
     class Config:
         from_attributes = True

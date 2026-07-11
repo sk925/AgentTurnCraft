@@ -243,6 +243,10 @@ def _ensure_chat_session_postgres_types() -> None:
                 text("ALTER TABLE chat_session ALTER COLUMN id TYPE VARCHAR(64) USING id::text")
             )
 
+        conn.execute(
+            text("ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS summary TEXT")
+        )
+
 
 def _ensure_pgvector_extension() -> None:
     if engine.dialect.name != "postgresql":

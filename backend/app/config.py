@@ -32,6 +32,14 @@ class Settings(BaseSettings):
 
     default_single_agent_id: int
 
+    # 单聊上下文滚动摘要（轮次结束后压缩 checkpoint；未配置模型时复用 agent_selector）
+    summary_enabled: bool = True
+    summary_trigger_tokens: int = 12000
+    summary_keep_messages: int = 24
+    summary_model_name: str = "qwen3.6-flash"
+    summary_model_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    summary_model_api_key: str = "sk-1b1644862e0c444788283ad51352c05d"
+
     # 开放单聊（Android 等第三方，免 JWT）
     public_chat_enabled: bool = True
     public_chat_api_key: str = "111"
