@@ -40,6 +40,7 @@ import {
   FileTextOutlined,
   FileWordOutlined,
   CloseOutlined,
+  EyeOutlined,
   LeftOutlined,
   LoadingOutlined,
   PlusOutlined,
@@ -80,7 +81,14 @@ import {
   ChatThinkingIndicator,
   ChatToolCallMessage,
   ChatUserMessage,
+  formatToolResult,
 } from '../components/chat/ChatMessageView';
+import WorkspaceFilePreviewModal from '../components/chat/WorkspaceFilePreviewModal';
+import {
+  formatFileSize,
+  formatModifiedTime,
+  isWorkspaceFilePreviewable,
+} from '../components/chat/workspacePreview';
 import './ChatWindow.css';
 
 const { TextArea } = Input;
@@ -153,7 +161,7 @@ function attachmentIconForFile(mime: string, fileName: string, size: number = 28
   if (m.startsWith('image/')) {
     return <FileImageOutlined style={{ ...style, color: '#0891b2' }} />;
   }
-  if (m.startsWith('text/') || ext === 'txt' || ext === 'md' || ext === 'csv' || ext === 'json') {
+  if (m.startsWith('text/') || ext === 'txt' || ext === 'md' || ext === 'csv' || ext === 'json' || ext === 'html' || ext === 'htm') {
     return <FileTextOutlined style={{ ...style, color: '#64748b' }} />;
   }
   return <FileOutlined style={{ ...style, color: '#64748b' }} />;
@@ -549,6 +557,8 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [selectedAgentId, setSelectedAgentId] = useState<number | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceArtifactFile[]>([]);
+  const [workspacePreviewFile, setWorkspacePreviewFile] = useState<WorkspaceArtifactFile | null>(null);
+  const [workspacePreviewOpen, setWorkspacePreviewOpen] = useState(false);
   const [currentSpeaker, setCurrentSpeaker] = useState<{ id: number; name: string } | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -787,6 +797,20 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     }
   };
 
+  const openWorkspacePreview = useCallback((file: WorkspaceArtifactFile) => {
+    if (!sessionId) {
+      message.warning('请先选择会话');
+      return;
+    }
+    setWorkspacePreviewFile(file);
+    setWorkspacePreviewOpen(true);
+  }, [sessionId]);
+
+  const closeWorkspacePreview = useCallback(() => {
+    setWorkspacePreviewOpen(false);
+    setWorkspacePreviewFile(null);
+  }, []);
+
   const handleSSEEvent = (event: ChatWindowEvent) => {
     switch (event.event) {
       case 'start':
@@ -941,7 +965,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         break;
       }
       case 'speaker_tool_out': {
-        const result = event.content ?? '';
+        const result = formatToolResult(event.content);
         setMessages((prev) =>
           attachToolResultToMessages(prev, event.tool_id, result, event.speaker_id),
         );
@@ -1715,19 +1739,68 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产物文件" />
                       ) : (
                         <div className="chat-workspace-file-list">
-                          {workspaceFiles.map((item) => (
-                            <div
-                              key={`${item.round_id}-${item.relative_path}`}
-                              className="chat-workspace-file-item"
-                            >
-                              <Typography.Text strong>{item.name}</Typography.Text>
-                              <div>
-                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {workspaceFiles.map((item) => {
+                            const previewable = isWorkspaceFilePreviewable(item.name);
+                            return (
+                              <div
+                                key={`${item.round_id}-${item.relative_path}`}
+                                className={`chat-workspace-file-item${previewable ? ' chat-workspace-file-item--previewable' : ''}`}
+                                onClick={previewable ? () => openWorkspacePreview(item) : undefined}
+                                onKeyDown={
+                                  previewable
+                                    ? (ev) => {
+                                        if (ev.key === 'Enter' || ev.key === ' ') {
+                                          ev.preventDefault();
+                                          openWorkspacePreview(item);
+                                        }
+                                      }
+                                    : undefined
+                                }
+                                role={previewable ? 'button' : undefined}
+                                tabIndex={previewable ? 0 : undefined}
+                              >
+                                <div className="chat-workspace-file-item__head">
+                                  <span className="chat-workspace-file-item__icon" aria-hidden>
+                                    {attachmentIconForFile('', item.name, 18)}
+                                  </span>
+                                  <Typography.Text
+                                    strong
+                                    className="chat-workspace-file-item__name"
+                                    ellipsis={{ tooltip: item.name }}
+                                  >
+                                    {item.name}
+                                  </Typography.Text>
+                                  {previewable ? (
+                                    <Tooltip title="预览">
+                                      <Button
+                                        type="text"
+                                        size="small"
+                                        className="chat-workspace-file-item__preview-btn"
+                                        icon={<EyeOutlined />}
+                                        aria-label={`预览 ${item.name}`}
+                                        onClick={(ev) => {
+                                          ev.stopPropagation();
+                                          openWorkspacePreview(item);
+                                        }}
+                                      />
+                                    </Tooltip>
+                                  ) : null}
+                                </div>
+                                <Typography.Text
+                                  type="secondary"
+                                  className="chat-workspace-file-item__path"
+                                >
                                   {item.relative_path}
                                 </Typography.Text>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {formatFileSize(item.size)}
+                                  {formatModifiedTime(item.modified_at)
+                                    ? ` · ${formatModifiedTime(item.modified_at)}`
+                                    : ''}
+                                </Typography.Text>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </Card>
@@ -1738,6 +1811,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           </Row>
         </div>
       )}
+      <WorkspaceFilePreviewModal
+        open={workspacePreviewOpen}
+        sessionId={sessionId}
+        file={workspacePreviewFile}
+        onClose={closeWorkspacePreview}
+      />
     </div>
   );
 }

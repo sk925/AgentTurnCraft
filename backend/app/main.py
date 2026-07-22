@@ -12,6 +12,7 @@ from app.chat.chat_router import router as chat_router
 from app.chat.open_chat_router import router as open_chat_router
 from app.chat.shared.checkpointer import set_checkpointer, set_sub_checkpointer
 from app.redis_client import init_redis, close_redis
+from app.mcp.client import init_mcp, close_mcp
 from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
 from app.chat.session import router as session_router
 from app.chat.workspace import workspace_files
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI):
     set_sub_checkpointer(sub_checkpointer)
 
     await init_redis()
+    await init_mcp()
     from app.chat.base.skill_cache_broadcast import (
         start_skill_cache_invalidation_listener,
         stop_skill_cache_invalidation_listener,
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await stop_skill_cache_invalidation_listener()
+        await close_mcp()
         await close_redis()
         await sub_checkpointer_cm.__aexit__(None, None, None)
         await checkpointer_cm.__aexit__(None, None, None)

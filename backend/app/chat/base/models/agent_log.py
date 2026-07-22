@@ -93,7 +93,7 @@ class AgentLogService:
                 round_id=round_id,
                 role_type=role_type,
                 message_type=type,
-                content=message.content,
+                content=_content_to_text_for_storage(message.content),
                 tool_name=message.name,
                 tool_call_id=message.tool_call_id,
                 speaker_id=current_speaker.get('id'),
@@ -133,12 +133,32 @@ class AgentLogService:
             session.add(row)
 
 
-def _content_to_text_for_storage(content: Any) -> str:
+def content_to_text(content: Any) -> str:
+    """将工具/模型 content 规范为可存储、可下发的文本。"""
     if content is None:
         return ''
     if isinstance(content, str):
         return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get('type') == 'text' and block.get('text') is not None:
+                parts.append(str(block['text']))
+            else:
+                try:
+                    parts.append(json.dumps(block, ensure_ascii=False))
+                except Exception:
+                    parts.append(str(block))
+        return '\n'.join(parts) if parts else ''
+    if isinstance(content, dict) and content.get('type') == 'text' and content.get('text') is not None:
+        return str(content['text'])
     try:
         return json.dumps(content, ensure_ascii=False)
     except Exception:
         return str(content)
+
+
+def _content_to_text_for_storage(content: Any) -> str:
+    return content_to_text(content)

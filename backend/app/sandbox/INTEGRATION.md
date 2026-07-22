@@ -80,5 +80,5 @@ output_dir = DockerSandboxManager.container_round_workspace(round_id)
 
 ## 注意
 
-- 自定义工具 `FileParser` / `web_search` 仍在宿主机执行，不受容器隔离。
+- 自定义工具 `FileParser` / `web_search` / `fetch_webpage` 仍在宿主机执行，不受容器隔离。
 - `network_disabled=true` 时容器内无网；搜索类工具需留在宿主机工具列表。

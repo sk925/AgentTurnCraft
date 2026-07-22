@@ -2,31 +2,22 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+from html import unescape
 from io import BytesIO, StringIO
 from pathlib import Path
 
+from bs4 import BeautifulSoup
+from langchain.tools import BaseTool, tool
 from langchain_core.callbacks import CallbackManagerForToolRun
 from minio.error import S3Error
+from pydantic import BaseModel, Field, model_validator
 
+from app.chat.base.models.upload_file import UploadFileService
 from app.config import settings
 from app.enums import FileType
-from app.chat.base.models.upload_file import UploadFileService
+from app.utils.http_fetch import fetch_url_bytes, normalize_http_url
 from app.utils.minio_storage import download_bytes
-from langchain.tools import BaseTool, tool
-
-
-class FileParser(BaseTool):
-    name: str = "parse_file"
-    description: str = (
-        "解析用户上传的文件内容，支持 txt/md/csv/json/html/xml/docx/xlsx/pptx/pdf；"
-        "扫描版 PDF 会在文字层为空时自动 OCR 识别。"
-    )
-
-    def _run(self, file_id: int,run_manager: CallbackManagerForToolRun | None = None) -> str:
-        """解析文件内容"""
-        return parse_file_by_id(file_id)
-
-      
 
 _MAX_CHARS = 100_000
 
@@ -46,8 +37,48 @@ _MIME_TO_TYPE: dict[str, FileType] = {
 }
 
 
+class ParseFileInput(BaseModel):
+    """parse_file 工具的入参：file_id 与 url 二选一。"""
+
+    file_id: int | None = Field(
+        default=None,
+        description="用户上传文件的 ID（对话附件场景）",
+    )
+    url: str | None = Field(
+        default=None,
+        description="文件下载链接（http/https），如 PDF、Word、Excel 等直链",
+    )
+
+    @model_validator(mode="after")
+    def _require_one_source(self) -> ParseFileInput:
+        has_id = self.file_id is not None
+        has_url = bool(self.url and self.url.strip())
+        if has_id == has_url:
+            raise ValueError("file_id 与 url 必须且只能提供一个")
+        return self
+
+
+class FileParser(BaseTool):
+    name: str = "parse_file"
+    description: str = (
+        "解析文件内容，支持 txt/md/csv/json/html/xml/docx/xlsx/pptx/pdf；"
+        "可通过 file_id 读取用户上传的文件，或通过 url 下载并解析远程文件（含 PDF 公告等）；"
+        "扫描版 PDF 会在文字层为空时自动 OCR 识别。"
+        "查看普通网页正文请优先使用 fetch_webpage。"
+    )
+    args_schema: type[BaseModel] = ParseFileInput
+
+    def _run(
+        self,
+        file_id: int | None = None,
+        url: str | None = None,
+        run_manager: CallbackManagerForToolRun | None = None,
+    ) -> str:
+        return parse_file_content(file_id=file_id, url=url)
+
+
 def _resolve_file_type(mime_or_ext: str, file_name: str) -> FileType | None:
-    """结合数据库中的 MIME（或扩展名）与原始文件名推断 FileType。"""
+    """结合 MIME（或扩展名）与文件名推断 FileType。"""
     raw = (mime_or_ext or "").strip().lower()
     if raw in {e.value for e in FileType}:
         return FileType(raw)
@@ -88,6 +119,15 @@ def _truncate(text: str) -> str:
 
 def _parse_plain(data: bytes) -> str:
     return _decode_text(data)
+
+
+def _parse_html(data: bytes) -> str:
+    html = _decode_text(data)
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
+        tag.decompose()
+    text = soup.get_text("\n", strip=True)
+    return unescape(re.sub(r"\n{3,}", "\n\n", text))
 
 
 def _parse_json_text(data: bytes) -> str:
@@ -136,10 +176,6 @@ def _parse_xlsx(data: bytes) -> str:
 
 
 def _parse_pptx(data: bytes) -> str:
-    """
-    按文档结构抽取：分页、版式名、标题占位、组合形状递归、表格按行列、其余文本框按层级缩进。
-    （不解析 SmartArt/图表内部数据；纯图无文字页可能为空。）
-    """
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -167,7 +203,6 @@ def _parse_pptx(data: bytes) -> str:
         if getattr(shape, "has_text_frame", False):
             t = shape.text_frame.text.strip()  # type: ignore[union-attr]
             if t:
-                # 保留段落换行，便于区分列表与多段正文
                 for block in t.split("\n"):
                     block = block.strip()
                     if block:
@@ -213,8 +248,10 @@ def _parse_pptx(data: bytes) -> str:
 
 
 def _parse_by_type(kind: FileType, data: bytes) -> str:
-    if kind in (FileType.TXT, FileType.MD, FileType.HTML, FileType.XML):
-        return _parse_plain(data) 
+    if kind == FileType.HTML:
+        return _parse_html(data)
+    if kind in (FileType.TXT, FileType.MD, FileType.XML):
+        return _parse_plain(data)
     if kind == FileType.JSON:
         return _parse_json_text(data)
     if kind == FileType.CSV:
@@ -230,34 +267,80 @@ def _parse_by_type(kind: FileType, data: bytes) -> str:
     raise ValueError(f"未实现的类型: {kind}")
 
 
-#@tool("parse_file_by_id", description="根据文件ID解析文件内容")
-def parse_file_by_id(file_id: int) -> str:
-    """根据文件ID解析文件内容"""
-    upload_file = UploadFileService.get_upload_file_by_id(file_id)
-    if not upload_file:
-        return "文件不存在"
-    kind = _resolve_file_type(upload_file.file_type, upload_file.file_name)
+def _parse_bytes(data: bytes, *, mime_or_ext: str, file_name: str, source: str) -> str:
+    if not data:
+        return "文件内容为空"
+
+    kind = _resolve_file_type(mime_or_ext, file_name)
     if kind is None:
         allowed = ", ".join(e.value for e in FileType)
         return (
-            f"无法识别文件类型（file_type={upload_file.file_type!r}, "
-            f"文件名={upload_file.file_name!r}）。支持的类型：{allowed}"
+            f"无法识别文件类型（type={mime_or_ext!r}, 文件名={file_name!r}）。"
+            f"支持的类型：{allowed}\n来源: {source}"
         )
+
+    try:
+        text = _parse_by_type(kind, data).strip()
+    except Exception as e:
+        return f"解析失败: {e}\n来源: {source}"
+
+    if not text:
+        return "解析结果为空（可能为加密文档、纯图片文件，或 OCR 未能识别到文字）"
+
+    header = f"来源: {source}\n类型: {kind.value}\n\n"
+    return _truncate(header + text)
+
+
+def parse_file_by_id(file_id: int) -> str:
+    """根据文件 ID 解析用户上传的文件内容。"""
+    upload_file = UploadFileService.get_upload_file_by_id(file_id)
+    if not upload_file:
+        return "文件不存在"
 
     try:
         data = download_bytes(settings.minio_bucket, upload_file.file_path)
     except S3Error as e:
         return f"从对象存储读取文件失败: {e.message}"
 
-    if not data:
-        return "文件内容为空"
+    return _parse_bytes(
+        data,
+        mime_or_ext=upload_file.file_type,
+        file_name=upload_file.file_name,
+        source=f"file_id={file_id} ({upload_file.file_name})",
+    )
 
+
+def parse_file_by_url(url: str) -> str:
+    """根据 URL 下载并解析远程文件内容。"""
     try:
-        text = _parse_by_type(kind, data).strip()
-    except Exception as e:
-        return f"解析失败: {e}"
+        normalized = normalize_http_url(url)
+        fetched = fetch_url_bytes(normalized)
+    except ValueError as exc:
+        return f"无效请求: {exc}"
+    except Exception as exc:
+        return f"下载失败: {exc}"
 
-    if not text:
-        return "解析结果为空（可能为加密文档、纯图片文件，或 OCR 未能识别到文字）"
+    return _parse_bytes(
+        fetched.data,
+        mime_or_ext=fetched.content_type,
+        file_name=fetched.filename_hint,
+        source=fetched.final_url,
+    )
 
-    return _truncate(text)
+
+def parse_file_content(*, file_id: int | None = None, url: str | None = None) -> str:
+    """统一入口：按 file_id 或 url 解析文件。"""
+    if file_id is not None:
+        return parse_file_by_id(file_id)
+    if url:
+        return parse_file_by_url(url)
+    return "请提供 file_id 或 url 之一"
+
+
+@tool(
+    "parse_file_by_id",
+    description="根据用户上传文件的 ID 解析文件内容（仅 file_id，不含 URL）。",
+)
+def parse_file_by_id_tool(file_id: int) -> str:
+    """供 agent_selector 等场景使用的 file_id 专用工具。"""
+    return parse_file_by_id(file_id)

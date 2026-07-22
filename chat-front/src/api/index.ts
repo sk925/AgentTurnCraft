@@ -733,6 +733,19 @@ export const chatWindowApi = {
       })
       .then((res) => ensureArray<WorkspaceArtifactFile>(res.data?.data));
   },
+  fetchWorkspaceFile: async (sessionId: string, relativePath: string) => {
+    const res = await api.get<Blob>('/chat/workspace_file', {
+      params: {
+        session_id: sessionId,
+        relative_path: relativePath,
+      },
+      responseType: 'blob',
+    });
+    const mime =
+      (typeof res.headers['content-type'] === 'string' && res.headers['content-type']) ||
+      'application/octet-stream';
+    return { blob: res.data, mime };
+  },
 };
 
 export const uploadFileApi = {

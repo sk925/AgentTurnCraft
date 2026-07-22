@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.chat.base.models.agent_log import AgentLogService
+from app.chat.base.models.agent_log import AgentLogService, content_to_text
 from app.chat.shared.chat_common import InnerNode, MsgType, RoleType
 from app.chat.shared.event_publisher import EventPublisher
 
@@ -165,7 +165,7 @@ async def stream_updates(
                 {
                     "event": "speaker_tool_out",
                     "tool_name": tool_msg.name,
-                    "content": tool_msg.content,
+                    "content": content_to_text(tool_msg.content),
                     "tool_id": tool_msg.tool_call_id,
                     "speaker_id": current_speaker.get("id"),
                     "speaker_name": current_speaker.get("name"),

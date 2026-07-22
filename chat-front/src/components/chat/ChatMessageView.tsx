@@ -118,6 +118,50 @@ function formatToolArgs(args: Record<string, unknown> | string | null | undefine
   }
 }
 
+export function formatToolResult(result: unknown): string {
+  if (result == null) {
+    return '';
+  }
+  if (typeof result === 'string') {
+    return result;
+  }
+  if (Array.isArray(result)) {
+    return result
+      .map((block) => {
+        if (typeof block === 'string') {
+          return block;
+        }
+        if (
+          block &&
+          typeof block === 'object' &&
+          (block as { type?: string }).type === 'text' &&
+          'text' in block
+        ) {
+          return String((block as { text: unknown }).text);
+        }
+        try {
+          return JSON.stringify(block, null, 2);
+        } catch {
+          return String(block);
+        }
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (
+    typeof result === 'object' &&
+    (result as { type?: string }).type === 'text' &&
+    'text' in result
+  ) {
+    return String((result as { text: unknown }).text);
+  }
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
 export type ChatToolCallItem = {
   tool_name: string;
   tool_args?: Record<string, unknown> | string | null;
@@ -134,7 +178,8 @@ type ChatToolCallMessageProps = {
 };
 
 function ChatToolCard({ tc }: { tc: ChatToolCallItem }) {
-  const done = tc.result != null && tc.result !== '';
+  const resultText = formatToolResult(tc.result);
+  const done = resultText !== '';
   const argsText = formatToolArgs(tc.tool_args);
   /** 默认收起，减少实时插入时撑高滚动区导致的抖动 */
   const [expanded, setExpanded] = useState(false);
@@ -169,7 +214,7 @@ function ChatToolCard({ tc }: { tc: ChatToolCallItem }) {
             {done ? (
               <div className="chat-tool-card__result-block">
                 <span className="chat-tool-card__result-label">执行结果</span>
-                <pre className="chat-tool-card__result">{tc.result}</pre>
+                <pre className="chat-tool-card__result">{resultText}</pre>
               </div>
             ) : (
               <div className="chat-tool-card__pending">等待执行结果…</div>
