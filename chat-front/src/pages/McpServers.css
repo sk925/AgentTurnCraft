@@ -1,0 +1,58 @@
+/* MCP 列表页局部样式（主题色见 portal.css 双 class 选择器） */
+
+.portal-page-hero + .ant-spin-nested-loading {
+  margin-top: 8px;
+}
+
+.portal-mcp-card-wrap {
+  cursor: pointer;
+  width: 100%;
+}
+
+.portal-mcp-card-wrap .portal-skill-card__desc {
+  -webkit-line-clamp: 2;
+}
+
+.portal-mcp-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.portal-mcp-card__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.portal-mcp-card__chip--on {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: rgba(5, 150, 105, 0.18);
+}
+
+.portal-mcp-card__chip--off {
+  color: #94a3b8;
+  background: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.portal-mcp-card__endpoint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--portal-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}

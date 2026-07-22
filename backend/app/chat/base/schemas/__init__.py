@@ -94,6 +94,7 @@ class AgentUpdate(BaseModel):
 
 class AgentResponse(AgentBase):
     id: int
+    user_id: int
     type: int = Field(validation_alias='resource_type', description='1 内置 2 自定义')
     create_time: datetime
     chat_model_id: str | None = None
@@ -128,8 +129,89 @@ class KnowledgeBaseBrief(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+_MCP_SENSITIVE_HEADER_KEYS = frozenset({"authorization", "proxy-authorization", "x-api-key"})
+
+
+def _mask_mcp_headers(headers: dict[str, Any] | None) -> dict[str, str] | None:
+    if not headers:
+        return None
+    masked: dict[str, str] = {}
+    for key, value in headers.items():
+        k = str(key)
+        if k.lower() in _MCP_SENSITIVE_HEADER_KEYS:
+            masked[k] = "***"
+        else:
+            masked[k] = str(value)
+    return masked
+
+
+class McpServerBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    transport: str = Field(description="http / streamable_http / stdio")
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[list[str]] = None
+    headers: Optional[dict[str, str]] = None
+    enabled: bool = True
+
+
+class McpServerCreate(McpServerBase):
+    pass
+
+
+class McpServerUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    transport: Optional[str] = None
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[list[str]] = None
+    headers: Optional[dict[str, str]] = None
+    enabled: Optional[bool] = None
+
+
+class McpServerResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    transport: str
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[list[str]] = None
+    headers: Optional[dict[str, str]] = None
+    enabled: bool = True
+    type: int = Field(validation_alias="resource_type", description="1 内置 2 自定义")
+    create_time: datetime
+    has_headers: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs: Any) -> "McpServerResponse":  # type: ignore[override]
+        if hasattr(obj, "headers") and not isinstance(obj, dict):
+            raw_headers = getattr(obj, "headers", None)
+            data = {
+                "id": obj.id,
+                "name": obj.name,
+                "description": obj.description,
+                "transport": obj.transport,
+                "url": obj.url,
+                "command": obj.command,
+                "args": list(obj.args) if isinstance(obj.args, list) else None,
+                "headers": _mask_mcp_headers(raw_headers if isinstance(raw_headers, dict) else None),
+                "enabled": bool(obj.enabled),
+                "resource_type": obj.resource_type,
+                "create_time": obj.create_time,
+                "has_headers": bool(raw_headers),
+            }
+            return super().model_validate(data, **kwargs)
+        return super().model_validate(obj, **kwargs)
+
+
 class AgentWithSkillsAndKnowledgeBases(AgentWithSkills):
     knowledge_bases: list[KnowledgeBaseBrief] = []
+    mcp_servers: list[McpServerResponse] = []
 
 
 class GroupBase(BaseModel):

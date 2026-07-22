@@ -9,6 +9,7 @@ from app.enums import PermissionMenu
 from app.manage.converters import permission_out
 from app.manage.deps import get_current_manage_user, require_manage_permission
 from app.manage.models import Permission, Role, User
+from app.manage.rbac_api import is_db_privileged_user
 from app.manage.schemas import PermissionCreate, PermissionMineOut, PermissionOut, PermissionUpdate
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
@@ -32,7 +33,7 @@ def get_my_permission_codes(
     for role in u.roles:
         for p in role.permissions:
             codes.add(p.code)
-    return PermissionMineOut(codes=sorted(codes))
+    return PermissionMineOut(codes=sorted(codes), is_privileged=is_db_privileged_user(u))
 
 
 @router.get("", response_model=list[PermissionOut])

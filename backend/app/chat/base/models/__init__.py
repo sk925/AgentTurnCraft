@@ -3,7 +3,12 @@
 from app.chat.base.models.agent_group_model import Group
 from app.chat.base.models.agent_log import AgentLog, AgentLogService
 from app.chat.base.models.agent_model import Agent, AgentService
-from app.chat.base.models.association_tables import group_agent, knowledge_base_agent, skill_agent
+from app.chat.base.models.association_tables import (
+    group_agent,
+    knowledge_base_agent,
+    mcp_server_agent,
+    skill_agent,
+)
 from app.chat.base.models.skill_model import Skill
 from app.chat.base.models.upload_file import UploadFile, UploadFileService
 
@@ -17,5 +22,7 @@ __all__ = [
     "UploadFile",
     "UploadFileService",
     "group_agent",
+    "knowledge_base_agent",
+    "mcp_server_agent",
     "skill_agent",
 ]

@@ -30,10 +30,13 @@ export const authApi = {
 /** 与后端 PermissionMineOut 一致 */
 export interface MyPermissionsOut {
   codes: string[];
+  /** 超级用户或 admin 角色：可管理内置资源 */
+  is_privileged?: boolean;
 }
 
 export const permissionsApi = {
-  getMine: () => api.get<MyPermissionsOut>('/permissions/me').then((res) => res.data.codes),
+  getMine: () => api.get<MyPermissionsOut>('/permissions/me').then((res) => res.data),
+  getMineCodes: () => permissionsApi.getMine().then((data) => data.codes),
 };
 
 /** 解析后端 JSON：成功体为 { code, message, data }；错误体同样字段，优先读 message，兼容旧版 detail */
@@ -227,6 +230,7 @@ export interface KnowledgeDocument {
 
 export interface Agent {
   id: number;
+  user_id?: number;
   name: string;
   description: string | null;
   prompt: string | null;
@@ -237,7 +241,44 @@ export interface Agent {
   chat_model_id?: string | null;
   skills?: Skill[];
   knowledge_bases?: KnowledgeBaseBrief[];
+  mcp_servers?: McpServer[];
 }
+
+export interface McpServer {
+  id: number;
+  name: string;
+  description: string | null;
+  transport: string;
+  url?: string | null;
+  command?: string | null;
+  args?: string[] | null;
+  headers?: Record<string, string> | null;
+  enabled: boolean;
+  /** 1 内置 2 自定义 */
+  type?: number;
+  create_time: string;
+  has_headers?: boolean;
+}
+
+export interface McpToolParameter {
+  name: string;
+  type: string;
+  title?: string | null;
+  description?: string | null;
+  default?: unknown;
+  has_default?: boolean;
+  required?: boolean;
+  maximum?: number | null;
+  minimum?: number | null;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description?: string | null;
+  args_schema?: Record<string, unknown> | null;
+  parameters?: McpToolParameter[];
+}
+
 
 /** 与后端 ChatModelResponse 对齐，用于智能体绑定模型下拉 */
 export interface ChatModelOption {
@@ -415,6 +456,8 @@ export interface ChatSpeakerInterruptEvent {
   event: 'speaker_interrupt';
   args: SpeakerInterruptArgs;
   tool_id?: string;
+  speaker_id?: number;
+  speaker_name?: string;
 }
 
 export interface ChatMainInterruptEvent {
@@ -657,7 +700,66 @@ export const agentsApi = {
     api.post(`/agents/${agentId}/knowledge-bases/${knowledgeBaseId}`, null),
   removeKnowledgeBase: (agentId: number, knowledgeBaseId: number) =>
     api.delete(`/agents/${agentId}/knowledge-bases/${knowledgeBaseId}`),
+  addMcpServer: (agentId: number, mcpServerId: number) =>
+    api.post(`/agents/${agentId}/mcp-servers/${mcpServerId}`, null),
+  removeMcpServer: (agentId: number, mcpServerId: number) =>
+    api.delete(`/agents/${agentId}/mcp-servers/${mcpServerId}`),
   getWithSkills: (id: number) => api.get<ApiResponse<Agent>>(`/agents/${id}`).then((res) => res.data.data),
+};
+
+export const mcpServersApi = {
+  list: (params?: { page?: number; page_size?: number; q?: string; type?: number }) =>
+    api
+      .get<ApiResponse<PaginatedData<McpServer>>>('/mcp-servers', { params })
+      .then((res) => {
+        const data = res.data?.data;
+        return {
+          items: ensureArray<McpServer>(data?.items),
+          total: data?.total ?? 0,
+          page: data?.page ?? 1,
+          page_size: data?.page_size ?? 12,
+        };
+      }),
+  getAll: () => fetchAllPaginatedItems(mcpServersApi.list),
+  get: (id: number) =>
+    api.get<ApiResponse<McpServer>>(`/mcp-servers/${id}`).then((res) => res.data.data),
+  listTools: async (id: number) => {
+    const res = await api.get<
+      ApiResponse<{ tools: McpToolInfo[]; disabled?: boolean; tool_count?: number }>
+    >(`/mcp-servers/${id}/tools`);
+    const data = res.data?.data;
+    return {
+      tools: ensureArray<McpToolInfo>(data?.tools),
+      disabled: Boolean(data?.disabled),
+      tool_count: data?.tool_count ?? 0,
+    };
+  },
+  create: (data: {
+    name: string;
+    description?: string;
+    transport: string;
+    url?: string;
+    command?: string;
+    args?: string[];
+    headers?: Record<string, string>;
+    enabled?: boolean;
+  }) => api.post<ApiResponse<McpServer>>('/mcp-servers', data).then((res) => res.data.data),
+  update: (
+    id: number,
+    data: {
+      name?: string;
+      description?: string;
+      transport?: string;
+      url?: string;
+      command?: string;
+      args?: string[];
+      headers?: Record<string, string>;
+      enabled?: boolean;
+    },
+  ) => api.put<ApiResponse<McpServer>>(`/mcp-servers/${id}`, data).then((res) => res.data.data),
+  delete: (id: number) => api.delete(`/mcp-servers/${id}`),
+  test: (id: number) =>
+    api.post<ApiResponse<{ ok: boolean; tool_count: number; tool_names: string[] }>>(`/mcp-servers/${id}/test`),
 };
 
 export const groupsApi = {
@@ -975,13 +1077,15 @@ export class ChatWebSocket {
     return true;
   }
 
-  /** 提交 speaker_interrupt 表单，恢复 LangGraph 执行 */
+  /** 提交 speaker_interrupt / main_interrupt 表单，恢复 LangGraph 执行 */
   sendInterruptResume(params: {
     org_id: number;
     session_id: string;
     round_id: string;
     session_type?: SessionType;
     group_id?: number | null;
+    /** 单聊须带回中断时的智能体，否则后端会落到默认智能体 */
+    single_agent_id?: string | null;
     resume: { data?: Record<string, string | string[]>; cancel?: boolean };
   }): boolean {
     return this.sendChat({
@@ -991,6 +1095,7 @@ export class ChatWebSocket {
       round_id: params.round_id,
       session_type: params.session_type,
       group_id: params.group_id,
+      single_agent_id: params.single_agent_id,
       resume: params.resume,
     });
   }

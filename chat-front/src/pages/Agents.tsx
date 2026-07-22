@@ -13,7 +13,16 @@ import {
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, RobotOutlined, ClockCircleOutlined, ApiOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { agentsApi, getBackendErrorMessage, goLoginPage, groupsApi, isUserLoggedIn, modelManageApi } from '../api';
+import {
+  agentsApi,
+  getBackendErrorMessage,
+  getCurrentUserIdFromToken,
+  goLoginPage,
+  groupsApi,
+  isUserLoggedIn,
+  modelManageApi,
+  permissionsApi,
+} from '../api';
 import type { Agent, ChatModelOption, Group } from '../api';
 
 const { Title, Paragraph, Text } = Typography;
@@ -85,15 +94,19 @@ function AgentCard({
   onOpen,
   onDelete,
   showDelete,
+  canManageBuiltin,
 }: {
   agent: Agent;
   modelLabel: string;
   onOpen: (id: number) => void;
   onDelete: (id: number) => void;
   showDelete: boolean;
+  canManageBuiltin: boolean;
 }) {
   const isBuiltin = agent.type === BUILTIN_TYPE;
-  const canDelete = showDelete && !isBuiltin;
+  const currentUserId = getCurrentUserIdFromToken();
+  const isOwner = currentUserId != null && agent.user_id === currentUserId;
+  const canDelete = showDelete && (!isBuiltin || isOwner || canManageBuiltin);
 
   return (
     <div className="portal-agent-card-wrap">
@@ -150,6 +163,7 @@ function AgentCard({
         >
           <Popconfirm
             title="确定删除该智能体吗？"
+            description={isBuiltin ? '这是内置智能体，删除后所有用户将不可见。' : undefined}
             onConfirm={() => void onDelete(agent.id)}
             okText="确定"
             cancelText="取消"
@@ -161,6 +175,7 @@ function AgentCard({
               size="small"
               icon={<DeleteOutlined />}
               disabled={!canDelete}
+              title={!canDelete && isBuiltin ? '仅创建人或管理员可删除内置智能体' : undefined}
             >
               删除
             </Button>
@@ -179,6 +194,7 @@ export default function AgentsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterGroupId, setFilterGroupId] = useState<number | undefined>(undefined);
+  const [canManageBuiltin, setCanManageBuiltin] = useState(false);
 
   const fetchAgents = async () => {
     setLoading(true);
@@ -189,6 +205,19 @@ export default function AgentsPage() {
       message.error(getBackendErrorMessage(error, '获取智能体列表失败'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPrivilege = async () => {
+    if (!isUserLoggedIn()) {
+      setCanManageBuiltin(false);
+      return;
+    }
+    try {
+      const me = await permissionsApi.getMine();
+      setCanManageBuiltin(!!me.is_privileged);
+    } catch {
+      setCanManageBuiltin(false);
     }
   };
 
@@ -214,6 +243,7 @@ export default function AgentsPage() {
     void fetchAgents();
     void fetchGroups();
     void fetchChatModels();
+    void fetchPrivilege();
   }, []);
 
   const agentIdsInFilterGroup = useMemo(() => {
@@ -332,6 +362,7 @@ export default function AgentsPage() {
                   onOpen={openAgentDetail}
                   onDelete={handleDelete}
                   showDelete={isUserLoggedIn()}
+                  canManageBuiltin={canManageBuiltin}
                 />
               </Col>
             ))}

@@ -23,18 +23,21 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   agentsApi,
   getBackendErrorMessage,
+  getCurrentUserIdFromToken,
   goLoginPage,
   isUserLoggedIn,
   modelManageApi,
+  permissionsApi,
   skillsApi,
   knowledgeBasesApi,
+  mcpServersApi,
 } from '../api';
-import type { Agent, ChatModelOption, KnowledgeBase, Skill } from '../api';
+import type { Agent, ChatModelOption, KnowledgeBase, McpServer, Skill } from '../api';
 
 const BUILTIN_TYPE = 1;
 const MAX_AGENT_KNOWLEDGE_BASES = 3;
 
-type DetailTab = 'settings' | 'prompt' | 'model' | 'skills' | 'knowledge';
+type DetailTab = 'settings' | 'prompt' | 'model' | 'skills' | 'knowledge' | 'mcp';
 
 function formatAgentDate(iso: string) {
   const d = new Date(iso);
@@ -53,6 +56,7 @@ export default function AgentDetailPage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [loading, setLoading] = useState(!isCreateMode);
   const [creating, setCreating] = useState(false);
@@ -70,6 +74,10 @@ export default function AgentDetailPage() {
   const [addKbModalOpen, setAddKbModalOpen] = useState(false);
   const [addKbSearch, setAddKbSearch] = useState('');
   const [addingKbId, setAddingKbId] = useState<number | null>(null);
+  const [addMcpModalOpen, setAddMcpModalOpen] = useState(false);
+  const [addMcpSearch, setAddMcpSearch] = useState('');
+  const [addingMcpId, setAddingMcpId] = useState<number | null>(null);
+  const [canManageBuiltin, setCanManageBuiltin] = useState(false);
 
   const fetchAgent = async () => {
     if (!Number.isFinite(agentId)) {
@@ -107,6 +115,15 @@ export default function AgentDetailPage() {
     }
   };
 
+  const fetchMcpServers = async () => {
+    try {
+      const data = await mcpServersApi.getAll();
+      setMcpServers(data);
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '获取 MCP 列表失败'));
+    }
+  };
+
   const fetchChatModels = async () => {
     try {
       const data = await modelManageApi.listChatModels();
@@ -116,10 +133,25 @@ export default function AgentDetailPage() {
     }
   };
 
+  const fetchPrivilege = async () => {
+    if (!isUserLoggedIn()) {
+      setCanManageBuiltin(false);
+      return;
+    }
+    try {
+      const me = await permissionsApi.getMine();
+      setCanManageBuiltin(!!me.is_privileged);
+    } catch {
+      setCanManageBuiltin(false);
+    }
+  };
+
   useEffect(() => {
     void fetchSkills();
     void fetchKnowledgeBases();
+    void fetchMcpServers();
     void fetchChatModels();
+    void fetchPrivilege();
   }, []);
 
   useEffect(() => {
@@ -209,8 +241,28 @@ export default function AgentDetailPage() {
     });
   }, [availableKnowledgeBases, addKbSearch]);
 
+  const agentMcpServers = agent?.mcp_servers ?? [];
+  const linkedMcpIds = useMemo(() => new Set(agentMcpServers.map((m) => m.id)), [agentMcpServers]);
+  const availableMcpServers = useMemo(
+    () => mcpServers.filter((m) => !linkedMcpIds.has(m.id) && m.enabled),
+    [mcpServers, linkedMcpIds],
+  );
+  const filteredAvailableMcpServers = useMemo(() => {
+    const q = addMcpSearch.trim().toLowerCase();
+    if (!q) {
+      return availableMcpServers;
+    }
+    return availableMcpServers.filter((m) => {
+      const desc = (m.description ?? '').toLowerCase();
+      return m.name.toLowerCase().includes(q) || desc.includes(q) || m.transport.toLowerCase().includes(q);
+    });
+  }, [availableMcpServers, addMcpSearch]);
+
   const isBuiltin = !isCreateMode && agent?.type === BUILTIN_TYPE;
-  const canManage = isUserLoggedIn() && (isCreateMode || !isBuiltin);
+  const currentUserId = getCurrentUserIdFromToken();
+  const isOwner = !!agent && currentUserId != null && agent.user_id === currentUserId;
+  const canManage =
+    isUserLoggedIn() && (isCreateMode || !isBuiltin || isOwner || canManageBuiltin);
   const showPage = isCreateMode || !!agent;
   const savedName = agent?.name ?? '';
   const savedDescription = agent?.description ?? '';
@@ -398,6 +450,46 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleAddMcpServer = async (mcpServerId: number) => {
+    if (!agent || !requireLogin()) {
+      return;
+    }
+    setAddingMcpId(mcpServerId);
+    try {
+      await agentsApi.addMcpServer(agent.id, mcpServerId);
+      message.success('关联成功');
+      void fetchAgent();
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '关联失败'));
+    } finally {
+      setAddingMcpId(null);
+    }
+  };
+
+  const openAddMcpModal = () => {
+    setAddMcpSearch('');
+    setAddMcpModalOpen(true);
+  };
+
+  const closeAddMcpModal = () => {
+    setAddMcpModalOpen(false);
+    setAddMcpSearch('');
+    setAddingMcpId(null);
+  };
+
+  const handleRemoveMcpServer = async (mcpServerId: number) => {
+    if (!agent || !requireLogin()) {
+      return;
+    }
+    try {
+      await agentsApi.removeMcpServer(agent.id, mcpServerId);
+      message.success('已解除关联');
+      void fetchAgent();
+    } catch (error) {
+      message.error(getBackendErrorMessage(error, '解除关联失败'));
+    }
+  };
+
   const modelLabel = modelDraft
     ? chatModelLabelById.get(modelDraft) ?? `ID ${modelDraft}`
     : '未配置';
@@ -512,6 +604,16 @@ export default function AgentDetailPage() {
                 关联知识库
               </Button>
             )}
+            {activeTab === 'mcp' && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={availableMcpServers.length === 0}
+                onClick={openAddMcpModal}
+              >
+                关联 MCP
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -566,6 +668,13 @@ export default function AgentDetailPage() {
                     <dd className="portal-agent-detail__meta-value">
                       {agentKnowledgeBases.length} / {MAX_AGENT_KNOWLEDGE_BASES}
                     </dd>
+                  </div>
+                  <div className="portal-agent-detail__meta-row">
+                    <dt className="portal-agent-detail__meta-label">
+                      <ApiOutlined />
+                      关联 MCP
+                    </dt>
+                    <dd className="portal-agent-detail__meta-value">{agentMcpServers.length} 个</dd>
                   </div>
                   <div className="portal-agent-detail__meta-row">
                     <dt className="portal-agent-detail__meta-label">
@@ -630,6 +739,18 @@ export default function AgentDetailPage() {
                     关联知识库
                     {agentKnowledgeBases.length > 0 && (
                       <span className="portal-agent-detail__tab-count">{agentKnowledgeBases.length}</span>
+                    )}
+                  </button>
+                <button
+                  type="button"
+                  className={`portal-agent-detail__tab${activeTab === 'mcp' ? ' is-active' : ''}`}
+                  aria-selected={activeTab === 'mcp'}
+                  onClick={() => setActiveTab('mcp')}
+                >
+                    <ApiOutlined />
+                    关联 MCP
+                    {agentMcpServers.length > 0 && (
+                      <span className="portal-agent-detail__tab-count">{agentMcpServers.length}</span>
                     )}
                   </button>
                 </nav>
@@ -891,6 +1012,82 @@ export default function AgentDetailPage() {
                       )}
                     </div>
                   )}
+                  {activeTab === 'mcp' && (
+                    <div className="portal-agent-detail__skills-viewport">
+                      {isCreateMode ? (
+                        <div className="portal-agent-detail__empty-state">
+                          <ApiOutlined />
+                          <span>创建智能体后可关联 MCP</span>
+                          <p className="portal-agent-detail__empty-hint">
+                            请先填写基础信息并点击右上角「创建智能体」
+                          </p>
+                        </div>
+                      ) : !canManage && agentMcpServers.length === 0 ? (
+                        <div className="portal-agent-detail__empty-state">
+                          <ApiOutlined />
+                          <span>尚未关联任何 MCP 服务</span>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="portal-agent-detail__kb-hint">
+                            绑定后对话将注入对应 MCP 工具。请先在「MCP」菜单中创建服务，并确保后端 MCP_ENABLED=true。
+                          </p>
+                          <ul className="portal-agent-detail__skills-grid">
+                            {agentMcpServers.map((mcp) => {
+                              const desc = mcp.description?.trim() || '';
+                              return (
+                                <li key={mcp.id} className="portal-agent-detail__skills-grid-item">
+                                  <article className="portal-agent-detail__skill-card">
+                                    {canManage && (
+                                      <button
+                                        type="button"
+                                        className="portal-agent-detail__skill-card-remove"
+                                        aria-label={`解除关联 ${mcp.name}`}
+                                        onClick={() => void handleRemoveMcpServer(mcp.id)}
+                                      >
+                                        <CloseOutlined />
+                                      </button>
+                                    )}
+                                    <div className="portal-agent-detail__skill-card-icon" aria-hidden>
+                                      <ApiOutlined />
+                                    </div>
+                                    <h3 className="portal-agent-detail__skill-card-name">{mcp.name}</h3>
+                                    <p
+                                      className={`portal-agent-detail__skill-card-desc${
+                                        desc ? '' : ' is-empty'
+                                      }`}
+                                    >
+                                      {desc || `${mcp.transport}${mcp.enabled ? '' : ' · 已禁用'}`}
+                                    </p>
+                                  </article>
+                                </li>
+                              );
+                            })}
+                            {canManage && (
+                              <li className="portal-agent-detail__skills-grid-item">
+                                <button
+                                  type="button"
+                                  className="portal-agent-detail__skill-card portal-agent-detail__skill-card--add"
+                                  disabled={availableMcpServers.length === 0}
+                                  onClick={openAddMcpModal}
+                                >
+                                  <span className="portal-agent-detail__skill-card-add-icon" aria-hidden>
+                                    <PlusOutlined />
+                                  </span>
+                                  <span className="portal-agent-detail__skill-card-add-title">关联 MCP</span>
+                                  <span className="portal-agent-detail__skill-card-add-hint">
+                                    {availableMcpServers.length > 0
+                                      ? `${availableMcpServers.length} 个可关联`
+                                      : '暂无已启用的可关联 MCP'}
+                                  </span>
+                                </button>
+                              </li>
+                            )}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </main>
             </div>
@@ -994,6 +1191,57 @@ export default function AgentDetailPage() {
                   </span>
                   <span className="portal-agent-detail__add-skill-item-body">
                     <span className="portal-agent-detail__add-skill-item-name">{kb.name}</span>
+                    <span className="portal-agent-detail__add-skill-item-desc">{desc}</span>
+                  </span>
+                  <span className="portal-agent-detail__add-skill-item-action">
+                    {isAdding ? <Spin size="small" /> : <PlusOutlined />}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="关联 MCP"
+        open={addMcpModalOpen}
+        onCancel={closeAddMcpModal}
+        footer={null}
+        width={520}
+        destroyOnClose
+        className="portal-agent-detail__add-skill-modal"
+      >
+        <Input
+          allowClear
+          placeholder="搜索 MCP 名称、描述或传输类型"
+          value={addMcpSearch}
+          onChange={(e) => setAddMcpSearch(e.target.value)}
+          className="portal-agent-detail__add-skill-search"
+        />
+        <div className="portal-agent-detail__add-skill-list" role="list">
+          {filteredAvailableMcpServers.length === 0 ? (
+            <div className="portal-agent-detail__add-skill-empty">
+              {availableMcpServers.length === 0 ? '暂无已启用的可关联 MCP' : '未找到匹配的 MCP'}
+            </div>
+          ) : (
+            filteredAvailableMcpServers.map((mcp) => {
+              const desc = mcp.description?.trim() || mcp.transport;
+              const isAdding = addingMcpId === mcp.id;
+              return (
+                <button
+                  key={mcp.id}
+                  type="button"
+                  role="listitem"
+                  className="portal-agent-detail__add-skill-item"
+                  disabled={isAdding || addingMcpId !== null}
+                  onClick={() => void handleAddMcpServer(mcp.id)}
+                >
+                  <span className="portal-agent-detail__add-skill-item-icon" aria-hidden>
+                    <ApiOutlined />
+                  </span>
+                  <span className="portal-agent-detail__add-skill-item-body">
+                    <span className="portal-agent-detail__add-skill-item-name">{mcp.name}</span>
                     <span className="portal-agent-detail__add-skill-item-desc">{desc}</span>
                   </span>
                   <span className="portal-agent-detail__add-skill-item-action">

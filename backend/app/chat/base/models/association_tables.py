@@ -34,3 +34,13 @@ knowledge_base_agent = Table(
     Column("create_time", DateTime, server_default=func.now()),
     extend_existing=True,
 )
+
+mcp_server_agent = Table(
+    "mcp_server_agent",
+    Base.metadata,
+    Column("id", Integer, primary_key=True),
+    Column("mcp_server_id", Integer, ForeignKey("mcp_server.id", ondelete="CASCADE")),
+    Column("agent_id", Integer, ForeignKey("agent.id", ondelete="CASCADE")),
+    Column("create_time", DateTime, server_default=func.now()),
+    extend_existing=True,
+)

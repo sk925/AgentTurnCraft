@@ -11,6 +11,7 @@ from app.auth import CurrentUser
 from app.constants import RESOURCE_TYPE_BUILTIN
 from app.chat.base.models import Agent, Group, Skill
 from app.knowledge.models import KnowledgeBase
+from app.mcp.models import McpServer
 
 
 def _skills_readable_query(session: Session, user: CurrentUser | None):
@@ -163,6 +164,68 @@ def get_knowledge_base_if_readable(
     user: CurrentUser | None,
 ) -> KnowledgeBase | None:
     row = session.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base_id).first()
+    if row is None:
+        return None
+    if row.resource_type == RESOURCE_TYPE_BUILTIN:
+        return row
+    if user is not None and row.user_id == user.id:
+        return row
+    return None
+
+
+def _mcp_servers_readable_query(session: Session, user: CurrentUser | None):
+    q = session.query(McpServer)
+    if user is None:
+        return q.filter(McpServer.resource_type == RESOURCE_TYPE_BUILTIN)
+    return q.filter(
+        or_(McpServer.user_id == user.id, McpServer.resource_type == RESOURCE_TYPE_BUILTIN)
+    )
+
+
+def list_mcp_servers_page(
+    session: Session,
+    user: CurrentUser | None,
+    *,
+    page: int,
+    page_size: int,
+    q: str | None = None,
+    resource_type: int | None = None,
+) -> tuple[list[McpServer], int]:
+    query = _mcp_servers_readable_query(session, user)
+
+    keyword = (q or "").strip()
+    if keyword:
+        pattern = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                McpServer.name.ilike(pattern),
+                McpServer.description.ilike(pattern),
+            )
+        )
+
+    if resource_type is not None:
+        query = query.filter(McpServer.resource_type == resource_type)
+
+    total = query.count()
+    items = (
+        query.order_by(McpServer.create_time.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
+
+
+def list_mcp_servers(session: Session, user: CurrentUser | None) -> list[McpServer]:
+    return _mcp_servers_readable_query(session, user).order_by(McpServer.create_time.desc()).all()
+
+
+def get_mcp_server_if_readable(
+    session: Session,
+    mcp_server_id: int,
+    user: CurrentUser | None,
+) -> McpServer | None:
+    row = session.query(McpServer).filter(McpServer.id == mcp_server_id).first()
     if row is None:
         return None
     if row.resource_type == RESOURCE_TYPE_BUILTIN:

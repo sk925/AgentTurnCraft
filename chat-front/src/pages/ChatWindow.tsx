@@ -457,6 +457,55 @@ type PendingAttachment = {
 
 type ActiveInterruptForm = SpeakerInterruptArgs & { tool_id?: string };
 
+/** 从 speaker_interrupt.args 或 main_interrupt.interrupt_data 解析询问表单 */
+function normalizeAskUserInterruptForm(payload: unknown): ActiveInterruptForm | null {
+  if (payload == null || typeof payload !== 'object') {
+    return null;
+  }
+  const raw = payload as Record<string, unknown>;
+  // main_interrupt: { type, reason, questions }；speaker_interrupt 已是 { reason, questions }
+  const source =
+    raw.type === 'ask_user_question' || Array.isArray(raw.questions)
+      ? raw
+      : raw.args != null && typeof raw.args === 'object'
+        ? (raw.args as Record<string, unknown>)
+        : null;
+  if (!source) {
+    return null;
+  }
+  const questionsRaw = source.questions;
+  if (!Array.isArray(questionsRaw) || questionsRaw.length === 0) {
+    return null;
+  }
+  const questions = questionsRaw
+    .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
+    .map((q) => {
+      const fieldKey = String(q.field_key ?? '').trim();
+      if (!fieldKey) {
+        return null;
+      }
+      return {
+        question: String(q.question ?? ''),
+        field_key: fieldKey,
+        field_label: String(q.field_label ?? fieldKey),
+        field_type: String(q.field_type ?? 'input'),
+        placeholder: q.placeholder == null ? null : String(q.placeholder),
+        choices: Array.isArray(q.choices)
+          ? q.choices.filter((c): c is string => typeof c === 'string')
+          : null,
+      };
+    })
+    .filter((q): q is NonNullable<typeof q> => q != null);
+  if (questions.length === 0) {
+    return null;
+  }
+  return {
+    reason: String(source.reason ?? ''),
+    questions,
+    tool_id: typeof raw.tool_id === 'string' ? raw.tool_id : undefined,
+  };
+}
+
 type SpeakerInterruptFormCardProps = {
   args: SpeakerInterruptArgs;
   submitting: boolean;
@@ -560,9 +609,11 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [workspacePreviewFile, setWorkspacePreviewFile] = useState<WorkspaceArtifactFile | null>(null);
   const [workspacePreviewOpen, setWorkspacePreviewOpen] = useState(false);
   const [currentSpeaker, setCurrentSpeaker] = useState<{ id: number; name: string } | null>(null);
+  const currentSpeakerRef = useRef(currentSpeaker);
+  currentSpeakerRef.current = currentSpeaker;
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  /** speaker_interrupt：待用户填写的表单 */
+  /** 待用户填写的询问表单（speaker_interrupt / main_interrupt） */
   const [activeInterruptForm, setActiveInterruptForm] = useState<ActiveInterruptForm | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const [showToolCalls, setShowToolCalls] = useState(readShowToolCallsPreference);
@@ -591,8 +642,34 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   roundIdRef.current = roundId;
   /** 展示 interrupt 表单时对应的 round_id（提交 resume 须沿用该轮次） */
   const interruptRoundIdRef = useRef<string | null>(null);
+  /** 中断发生时的单聊智能体（resume 必须带回，避免落到默认智能体） */
+  const interruptAgentIdRef = useRef<number | null>(null);
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
   /** 当前连接上正在进行的 chat 轮次；避免 start 改 URL 后误触发 catchup / 重载历史 */
   const liveChatRoundRef = useRef(false);
+
+  const clearInterruptState = () => {
+    setActiveInterruptForm(null);
+    interruptRoundIdRef.current = null;
+    interruptAgentIdRef.current = null;
+  };
+
+  const captureInterruptAgent = (speakerId?: number | null) => {
+    if (typeof speakerId === 'number' && Number.isFinite(speakerId)) {
+      interruptAgentIdRef.current = speakerId;
+      return;
+    }
+    interruptAgentIdRef.current = selectedAgentIdRef.current ?? null;
+  };
+
+  const resumeSingleAgentId = (): string | undefined => {
+    if (isGroupChat) {
+      return undefined;
+    }
+    const agentId = interruptAgentIdRef.current ?? selectedAgentIdRef.current;
+    return agentId != null ? String(agentId) : undefined;
+  };
 
   const syncChatViewportHeight = useCallback(() => {
     const el = chatViewportRootRef.current;
@@ -817,6 +894,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         sessionIdRef.current = event.session_id;
         roundIdRef.current = event.round_id;
         interruptRoundIdRef.current = null;
+        interruptAgentIdRef.current = null;
         liveChatRoundRef.current = true;
         setSessionId(event.session_id);
         setRoundId(event.round_id);
@@ -971,25 +1049,37 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         );
         break;
       }
-      case 'speaker_interrupt':
-        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
-        interruptRoundIdRef.current = roundIdRef.current;
-        setActiveInterruptForm({
+      case 'speaker_interrupt': {
+        const form = normalizeAskUserInterruptForm({
           reason: event.args?.reason ?? '',
-          questions: Array.isArray(event.args?.questions) ? event.args.questions : [],
+          questions: event.args?.questions,
           tool_id: event.tool_id,
         });
+        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+        if (form) {
+          interruptRoundIdRef.current = roundIdRef.current;
+          captureInterruptAgent(event.speaker_id);
+          setActiveInterruptForm(form);
+        }
         setSubmitting(false);
         break;
-      case 'main_interrupt':
+      }
+      case 'main_interrupt': {
+        // 含子代理 task 冒泡：通常只有 main_interrupt，需据此弹询问框
+        const form = normalizeAskUserInterruptForm(event.interrupt_data);
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+        if (form) {
+          interruptRoundIdRef.current = roundIdRef.current;
+          captureInterruptAgent(currentSpeakerRef.current?.id);
+          setActiveInterruptForm(form);
+        }
         setSubmitting(false);
         liveChatRoundRef.current = false;
         break;
+      }
       case 'speaker_finished':
         liveChatRoundRef.current = false;
-        setActiveInterruptForm(null);
-        interruptRoundIdRef.current = null;
+        clearInterruptState();
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
         );
@@ -999,8 +1089,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         break;
       case 'finished':
         liveChatRoundRef.current = false;
-        setActiveInterruptForm(null);
-        interruptRoundIdRef.current = null;
+        clearInterruptState();
         setRoundId(null);
         setMessages((prev) =>
           prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
@@ -1042,8 +1131,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       console.error('[ChatWindow] 服务端错误:', event.message);
       message.error(event.message || '服务端错误');
       liveChatRoundRef.current = false;
-      setActiveInterruptForm(null);
-      interruptRoundIdRef.current = null;
+      clearInterruptState();
       setSubmitting(false);
       return;
     }
@@ -1095,9 +1183,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       message.warning('请先登录');
       return;
     }
+    const singleAgentId = resumeSingleAgentId();
     setSubmitting(true);
-    setActiveInterruptForm(null);
-    interruptRoundIdRef.current = null;
+    clearInterruptState();
     liveChatRoundRef.current = true;
     const sent = chatWebSocket.sendInterruptResume({
       org_id: orgId,
@@ -1105,6 +1193,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       round_id: rid,
       session_type: sessionType,
       group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+      single_agent_id: singleAgentId,
       resume: { data: values },
     });
     if (!sent) {
@@ -1117,17 +1206,17 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     const sid = sessionIdRef.current ?? sessionId;
     const rid = interruptRoundIdRef.current ?? roundIdRef.current ?? roundId;
     if (!sid) {
-      setActiveInterruptForm(null);
+      clearInterruptState();
       return;
     }
     if (!rid) {
-      setActiveInterruptForm(null);
+      clearInterruptState();
       message.warning('缺少对话轮次信息，请刷新页面后重试');
       return;
     }
+    const singleAgentId = resumeSingleAgentId();
     setSubmitting(true);
-    setActiveInterruptForm(null);
-    interruptRoundIdRef.current = null;
+    clearInterruptState();
     liveChatRoundRef.current = true;
     const sent = chatWebSocket.sendInterruptResume({
       org_id: orgId,
@@ -1135,6 +1224,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       round_id: rid,
       session_type: sessionType,
       group_id: isGroupChat && selectedGroupId != null ? selectedGroupId : undefined,
+      single_agent_id: singleAgentId,
       resume: { cancel: true },
     });
     if (!sent) {
@@ -1292,6 +1382,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       setSessionId(null);
       setRoundId(null);
       interruptRoundIdRef.current = null;
+      interruptAgentIdRef.current = null;
       setCurrentSpeaker(null);
       setMessages([]);
       setWorkspaceFiles([]);

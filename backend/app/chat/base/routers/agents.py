@@ -2,10 +2,10 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.manage.deps import get_current_manage_user, require_manage_permission, require_manage_roles
+from app.manage.deps import get_current_manage_user, require_manage_roles
 from app.manage.models import User
+from app.manage.rbac_api import is_db_privileged_user
 
-from app.auth import CurrentUser, get_current_user, get_current_user_id
 from app.constants import RESOURCE_TYPE_BUILTIN, RESOURCE_TYPE_CUSTOM
 from app.database import get_db
 from app.model_manage.model_cat import ChatModel
@@ -21,7 +21,8 @@ from app.chat.base.schemas import (
     success_response,
 )
 from app.knowledge.binding import validate_agent_knowledge_base_binding
-from app.query_access import get_knowledge_base_if_readable
+from app.query_access import get_knowledge_base_if_readable, get_mcp_server_if_readable
+from app.mcp.client import refresh_server_tools_sync
 
 router = APIRouter()
 
@@ -32,6 +33,18 @@ def _ensure_chat_model_exists(db: Session, chat_model_id: int | None) -> None:
     exists = db.query(ChatModel.id).filter(ChatModel.id == chat_model_id).first()
     if not exists:
         raise HTTPException(status_code=400, detail="所选聊天模型不存在")
+
+
+def _can_manage_agent(user: User, agent: Agent) -> bool:
+    """创建人或特权用户（超级用户 / admin 角色）可管理。"""
+    if agent.user_id == user.id:
+        return True
+    return is_db_privileged_user(user)
+
+
+def _assert_can_manage_agent(user: User, agent: Agent, *, action: str) -> None:
+    if not _can_manage_agent(user, agent):
+        raise HTTPException(status_code=403, detail=f"无权{action}：仅创建人或管理员可操作")
 
 
 @router.get("/agents", response_model=ApiResponse[List[AgentResponse]])
@@ -46,13 +59,13 @@ def get_agents(
 
 @router.post("/agents", response_model=ApiResponse[AgentResponse])
 def create_agent(
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     agent: AgentCreate,
     db: Session = Depends(get_db),
 ):
     """添加智能体"""
     _ensure_chat_model_exists(db, agent.chat_model_id)
-    resource_type = RESOURCE_TYPE_BUILTIN if current_user.is_superuser else RESOURCE_TYPE_CUSTOM
+    resource_type = RESOURCE_TYPE_BUILTIN if is_db_privileged_user(current_user) else RESOURCE_TYPE_CUSTOM
     db_agent = Agent(**agent.model_dump(), user_id=current_user.id, resource_type=resource_type)
     db.add(db_agent)
     db.commit()
@@ -62,15 +75,15 @@ def create_agent(
 
 @router.delete("/agents/{agent_id}")
 def delete_agent(
-    agent_id: int, 
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))], 
-    db: Session = Depends(get_db)):
-    """删除智能体（仅创建人可删）"""
+    agent_id: int,
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
+    db: Session = Depends(get_db),
+):
+    """删除智能体（创建人或管理员可删，含内置）"""
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
-    if agent.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权删除：仅创建人可删除该智能体")
+    _assert_can_manage_agent(current_user, agent, action="删除")
 
     db.delete(agent)
     db.commit()
@@ -81,7 +94,7 @@ def delete_agent(
 @router.put("/agents/{agent_id}", response_model=ApiResponse[AgentResponse])
 def update_agent(
     agent_id: int,
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     agent_data: AgentUpdate,
     db: Session = Depends(get_db),
 ):
@@ -89,8 +102,7 @@ def update_agent(
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
-    if agent.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权编辑：仅创建人可修改该智能体")
+    _assert_can_manage_agent(current_user, agent, action="编辑")
 
     update_data = agent_data.model_dump(exclude_unset=True)
     if "name" in update_data and not update_data["name"]:
@@ -114,15 +126,14 @@ def update_agent(
 def add_skill_to_agent(
     agent_id: int,
     skill_id: int,
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     db: Session = Depends(get_db),
 ):
     """关联技能到智能体"""
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
-    if agent.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权关联技能：仅创建人可关联技能")
+    _assert_can_manage_agent(current_user, agent, action="关联技能")
 
     skill = get_skill_if_readable(db, skill_id, current_user)
     if not skill:
@@ -157,13 +168,14 @@ def add_skill_to_agent(
 def remove_skill_from_agent(
     agent_id: int,
     skill_id: int,
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     db: Session = Depends(get_db),
 ):
     """解除技能与智能体的关联"""
-    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.user_id == current_user.id).first()
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
+    _assert_can_manage_agent(current_user, agent, action="解除技能关联")
 
     skill = get_skill_if_readable(db, skill_id, current_user)
     if not skill:
@@ -185,7 +197,7 @@ def remove_skill_from_agent(
 @router.get("/agents/{agent_id}", response_model=ApiResponse[AgentWithSkillsAndKnowledgeBases])
 def get_agent_with_skills(
     agent_id: int,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_manage_user)],
     db: Session = Depends(get_db),
 ):
     """获取智能体及其关联的技能、知识库（须登录：仅可访问内置或本人数据）"""
@@ -199,15 +211,14 @@ def get_agent_with_skills(
 def add_knowledge_base_to_agent(
     agent_id: int,
     knowledge_base_id: int,
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     db: Session = Depends(get_db),
 ):
     """关联知识库到智能体（同 Embedding 模型，最多 3 个）。"""
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
-    if agent.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权关联知识库：仅创建人可关联知识库")
+    _assert_can_manage_agent(current_user, agent, action="关联知识库")
 
     knowledge_base = get_knowledge_base_if_readable(db, knowledge_base_id, current_user)
     if not knowledge_base:
@@ -235,13 +246,14 @@ def add_knowledge_base_to_agent(
 def remove_knowledge_base_from_agent(
     agent_id: int,
     knowledge_base_id: int,
-    current_user: Annotated[CurrentUser, Depends(require_manage_roles("agent_manager"))],
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
     db: Session = Depends(get_db),
 ):
     """解除知识库与智能体的关联。"""
-    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.user_id == current_user.id).first()
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
+    _assert_can_manage_agent(current_user, agent, action="解除知识库关联")
 
     knowledge_base = get_knowledge_base_if_readable(db, knowledge_base_id, current_user)
     if not knowledge_base:
@@ -249,6 +261,67 @@ def remove_knowledge_base_from_agent(
 
     if knowledge_base in agent.knowledge_bases:
         agent.knowledge_bases.remove(knowledge_base)
+        db.commit()
+        from app.harness import evict_agent_runtime_cache_for_agent_ids
+
+        evict_agent_runtime_cache_for_agent_ids([agent_id])
+
+    return success_response({"unlinked": True}, message="解除关联成功")
+
+
+@router.post("/agents/{agent_id}/mcp-servers/{mcp_server_id}")
+def add_mcp_server_to_agent(
+    agent_id: int,
+    mcp_server_id: int,
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
+    db: Session = Depends(get_db),
+):
+    """关联 MCP 服务到智能体。"""
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    _assert_can_manage_agent(current_user, agent, action="关联 MCP")
+
+    mcp_server = get_mcp_server_if_readable(db, mcp_server_id, current_user)
+    if not mcp_server:
+        raise HTTPException(status_code=404, detail="MCP 服务不存在")
+    if not mcp_server.enabled:
+        raise HTTPException(status_code=400, detail="该 MCP 服务已禁用，无法关联")
+
+    if mcp_server in agent.mcp_servers:
+        return success_response({"linked": True}, message="关联成功")
+
+    agent.mcp_servers.append(mcp_server)
+    db.commit()
+    from app.harness import evict_agent_runtime_cache_for_agent_ids
+
+    evict_agent_runtime_cache_for_agent_ids([agent_id])
+    try:
+        refresh_server_tools_sync(mcp_server_id)
+    except Exception:
+        pass
+    return success_response({"linked": True}, message="关联成功")
+
+
+@router.delete("/agents/{agent_id}/mcp-servers/{mcp_server_id}")
+def remove_mcp_server_from_agent(
+    agent_id: int,
+    mcp_server_id: int,
+    current_user: Annotated[User, Depends(require_manage_roles("agent_manager"))],
+    db: Session = Depends(get_db),
+):
+    """解除 MCP 服务与智能体的关联。"""
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    _assert_can_manage_agent(current_user, agent, action="解除 MCP 关联")
+
+    mcp_server = get_mcp_server_if_readable(db, mcp_server_id, current_user)
+    if not mcp_server:
+        raise HTTPException(status_code=404, detail="MCP 服务不存在")
+
+    if mcp_server in agent.mcp_servers:
+        agent.mcp_servers.remove(mcp_server)
         db.commit()
         from app.harness import evict_agent_runtime_cache_for_agent_ids
 

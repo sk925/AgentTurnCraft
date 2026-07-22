@@ -26,3 +26,7 @@ class PermissionMineOut(BaseModel):
     """当前用户拥有的权限编码（含菜单与其它），用于前端侧栏等。"""
 
     codes: list[str]
+    is_privileged: bool = Field(
+        default=False,
+        description="超级用户或 admin 角色：可管理内置资源",
+    )

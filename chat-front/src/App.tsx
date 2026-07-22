@@ -7,6 +7,7 @@ import {
   PlusOutlined,
   RobotOutlined,
   DatabaseOutlined,
+  ApiOutlined,
   TeamOutlined,
   ToolOutlined,
   UserOutlined,
@@ -18,6 +19,8 @@ import { PortalSessionsProvider } from './PortalSessionsContext';
 import SkillsPage from './pages/Skills';
 import KnowledgeBasesPage from './pages/KnowledgeBases';
 import KnowledgeBaseDetailPage from './pages/KnowledgeBaseDetail';
+import McpServersPage from './pages/McpServers';
+import McpServerDetailPage from './pages/McpServerDetail';
 import AgentsPage from './pages/Agents';
 import AgentDetailPage from './pages/AgentDetail';
 import GroupsPage from './pages/Groups';
@@ -44,6 +47,7 @@ const { Sider, Content } = Layout;
 const MENU_PATH_TO_PERMISSION: Record<string, string> = {
   '/skills': 'skill_management',
   '/knowledge-bases': 'knowledge_management',
+  '/mcp-servers': 'mcp_management',
   '/agents': 'agent_management',
   '/groups': 'group_management',
   '/chat': 'chat',
@@ -59,6 +63,9 @@ function navSelectedKey(pathname: string): string {
   }
   if (pathname.startsWith('/knowledge-bases')) {
     return '/knowledge-bases';
+  }
+  if (pathname.startsWith('/mcp-servers')) {
+    return '/mcp-servers';
   }
   if (pathname === '/' || pathname.startsWith('/chat')) {
     return '/chat';
@@ -166,6 +173,7 @@ function AppLayout() {
     const all: MenuProps['items'] = [
       { key: '/skills', icon: <ToolOutlined />, label: '技能' },
       { key: '/knowledge-bases', icon: <DatabaseOutlined />, label: '知识库' },
+      { key: '/mcp-servers', icon: <ApiOutlined />, label: 'MCP' },
       { key: '/agents', icon: <RobotOutlined />, label: '智能体' },
       { key: '/groups', icon: <UsergroupAddOutlined />, label: '群组' },
       { key: '/chat', icon: <MessageOutlined />, label: '对话' },
@@ -239,9 +247,9 @@ function AppLayout() {
       }
       setPermissionsReady(false);
       try {
-        const codes = await permissionsApi.getMine();
+        const me = await permissionsApi.getMine();
         if (!cancelled) {
-          setMyPermissionCodes(codes);
+          setMyPermissionCodes(me.codes);
         }
       } catch (error) {
         if (!cancelled) {
@@ -489,6 +497,8 @@ function AppLayout() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
             <Route path="/knowledge-bases/:id" element={<KnowledgeBaseDetailPage />} />
+            <Route path="/mcp-servers" element={<McpServersPage />} />
+            <Route path="/mcp-servers/:id" element={<McpServerDetailPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id" element={<AgentDetailPage />} />
             <Route path="/groups" element={<GroupsPage />} />

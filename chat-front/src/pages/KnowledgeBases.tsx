@@ -340,7 +340,7 @@ export default function KnowledgeBasesPage() {
     <div>
       <div className="portal-page-hero">
         <Title level={2}>知识库</Title>
-        <Paragraph type="secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
           上传企业文档并建立向量索引。在「智能体」详情中关联知识库后，对话时可检索相关片段。
         </Paragraph>
         <div className="portal-toolbar portal-skills-toolbar">

@@ -392,6 +392,7 @@ def init_db():
     import app.knowledge.models.knowledge_base_model as _knowledge_base  # noqa: F401
     import app.knowledge.models.knowledge_document_model as _knowledge_document  # noqa: F401
     import app.knowledge.models.knowledge_chunk_model as _knowledge_chunk  # noqa: F401
+    import app.mcp.models as _mcp_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_pgvector_extension()

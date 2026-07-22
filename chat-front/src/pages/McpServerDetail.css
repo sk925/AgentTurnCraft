@@ -1,0 +1,148 @@
+.mcp-detail-page-header {
+  margin-bottom: 20px;
+}
+
+.mcp-detail-page-header__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.mcp-detail-page-header__titles {
+  min-width: 0;
+  flex: 1;
+}
+
+.mcp-detail-page-header__name {
+  margin: 0 0 4px !important;
+  line-height: 1.35;
+}
+
+.mcp-detail-page-header__desc {
+  margin-bottom: 0 !important;
+}
+
+.mcp-detail-page-header__refresh {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.mcp-detail-meta,
+.mcp-detail-tools {
+  margin-bottom: 20px;
+  padding: 20px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+}
+
+.mcp-detail-meta__row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.mcp-detail-meta__tags {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mcp-detail-meta__grid {
+  display: grid;
+  gap: 8px;
+}
+
+.mcp-detail-tools__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.mcp-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mcp-tool-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.mcp-tool-card__head {
+  padding: 14px 16px 10px;
+  background: #fff;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.mcp-tool-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.mcp-tool-card__name.ant-typography,
+.mcp-tool-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1677ff !important;
+  background: #e6f4ff !important;
+  border-color: #91caff !important;
+}
+
+.mcp-tool-card__desc {
+  margin-bottom: 0 !important;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.mcp-tool-card__body {
+  padding: 10px 16px 14px;
+}
+
+.mcp-tool-card__fold-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mcp-tool-card__fold-btn:hover {
+  color: #1677ff;
+}
+
+.mcp-tool-card__params {
+  margin-top: 10px;
+}
+
+.mcp-tool-params-table .ant-table {
+  background: #fff;
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .mcp-detail-page-header__title-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mcp-detail-page-header__refresh {
+    align-self: flex-end;
+  }
+}

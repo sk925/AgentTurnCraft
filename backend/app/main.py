@@ -13,6 +13,7 @@ from app.chat.open_chat_router import router as open_chat_router
 from app.chat.shared.checkpointer import set_checkpointer, set_sub_checkpointer
 from app.redis_client import init_redis, close_redis
 from app.mcp.client import init_mcp, close_mcp
+from app.mcp import routers as mcp_servers_router
 from app.chat.base.schemas import ApiResponse, api_error_dict, success_response
 from app.chat.session import router as session_router
 from app.chat.workspace import workspace_files
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
     set_sub_checkpointer(sub_checkpointer)
 
     await init_redis()
+    # 初始化 MCP
     await init_mcp()
     from app.chat.base.skill_cache_broadcast import (
         start_skill_cache_invalidation_listener,
@@ -112,6 +114,7 @@ app.include_router(manage_permissions.router, prefix="/api", tags=["permissions"
 app.include_router(model_manage_router, prefix="/api", tags=["model-manage"])
 app.include_router(knowledge_bases_router.router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(knowledge_documents_router.router, prefix="/api", tags=["knowledge-documents"])
+app.include_router(mcp_servers_router.router, prefix="/api", tags=["mcp-servers"])
 
 
 @app.get("/scalar", include_in_schema=False)
