@@ -169,6 +169,13 @@ export type ChatToolCallItem = {
   result?: string | null;
 };
 
+export type ChatTodoStatus = 'pending' | 'in_progress' | 'completed';
+
+export type ChatTodoItem = {
+  content: string;
+  status: ChatTodoStatus;
+};
+
 type ChatToolCallMessageProps = {
   title: string;
   toolCalls: ChatToolCallItem[];
@@ -176,6 +183,153 @@ type ChatToolCallMessageProps = {
   animate?: boolean;
   enterIndex?: number;
 };
+
+const TODO_STATUS_LABEL: Record<ChatTodoStatus, string> = {
+  pending: '待办',
+  in_progress: '进行中',
+  completed: '已完成',
+};
+
+function normalizeTodoStatus(raw: unknown): ChatTodoStatus {
+  if (raw === 'completed' || raw === 'in_progress' || raw === 'pending') {
+    return raw;
+  }
+  return 'pending';
+}
+
+/** 从 write_todos 的 tool_args 解析任务列表 */
+export function parseWriteTodosArgs(
+  args: Record<string, unknown> | string | null | undefined,
+): ChatTodoItem[] {
+  let payload: unknown = args;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return [];
+    }
+  }
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+  const todosRaw = (payload as { todos?: unknown }).todos;
+  if (!Array.isArray(todosRaw)) {
+    return [];
+  }
+  return todosRaw
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const content = String((item as { content?: unknown }).content ?? '').trim();
+      if (!content) {
+        return null;
+      }
+      return {
+        content,
+        status: normalizeTodoStatus((item as { status?: unknown }).status),
+      };
+    })
+    .filter((item): item is ChatTodoItem => item != null);
+}
+
+function ChatTodoListCard({ tc }: { tc: ChatToolCallItem }) {
+  const todos = parseWriteTodosArgs(tc.tool_args);
+  const completed = todos.filter((t) => t.status === 'completed').length;
+  const inProgress = todos.filter((t) => t.status === 'in_progress').length;
+  const allDone = todos.length > 0 && completed === todos.length;
+  /** 任务列表本身就是内容，默认展开 */
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div
+      className={`chat-todo-card${allDone ? ' chat-todo-card--done' : ''}${inProgress > 0 ? ' chat-todo-card--running' : ''}${expanded ? ' chat-todo-card--expanded' : ' chat-todo-card--collapsed'}`}
+    >
+      <button
+        type="button"
+        className="chat-todo-card__head"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? '收起任务列表' : '展开任务列表'}
+      >
+        <span className="chat-todo-card__chevron" aria-hidden />
+        <span className="chat-todo-card__badge">任务列表</span>
+        <span className="chat-todo-card__progress">
+          {todos.length === 0 ? '暂无任务' : `${completed}/${todos.length} 已完成`}
+        </span>
+        <span className="chat-todo-card__spacer" aria-hidden />
+        {allDone ? (
+          <span className="chat-todo-card__status chat-todo-card__status--done">全部完成</span>
+        ) : inProgress > 0 ? (
+          <span className="chat-todo-card__status chat-todo-card__status--running">进行中</span>
+        ) : (
+          <span className="chat-todo-card__status chat-todo-card__status--pending">待开始</span>
+        )}
+      </button>
+      <div className="chat-todo-card__panel" aria-hidden={!expanded}>
+        <div className="chat-todo-card__panel-inner">
+          {todos.length === 0 ? (
+            <div className="chat-todo-card__empty">未能解析任务内容</div>
+          ) : (
+            <ul className="chat-todo-card__list">
+              {todos.map((todo, index) => (
+                <li
+                  key={`${tc.tool_id}-${index}`}
+                  className={`chat-todo-card__item chat-todo-card__item--${todo.status}`}
+                >
+                  <span className="chat-todo-card__marker" aria-hidden>
+                    {todo.status === 'completed' ? (
+                      <svg viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
+                        <path
+                          d="M5 8.2 7.1 10.2 11 5.8"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : todo.status === 'in_progress' ? (
+                      <svg viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" opacity="0.35" />
+                        <path
+                          d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
+                      </svg>
+                    )}
+                  </span>
+                  <span className="chat-todo-card__content">{todo.content}</span>
+                  <span className="chat-todo-card__item-status">{TODO_STATUS_LABEL[todo.status]}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolCallGlyph() {
+  return (
+    <svg className="chat-tool-card__glyph" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M10.6 2.4a2.9 2.9 0 0 0-3.9 3.9L3.4 9.6a1.5 1.5 0 1 0 2.1 2.1l3.3-3.3a2.9 2.9 0 0 0 3.9-3.9L11 6.1 9.9 5l.7-2.6Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path d="M9.9 5 11 6.1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function ChatToolCard({ tc }: { tc: ChatToolCallItem }) {
   const resultText = formatToolResult(tc.result);
@@ -186,7 +340,7 @@ function ChatToolCard({ tc }: { tc: ChatToolCallItem }) {
 
   return (
     <div
-      className={`chat-tool-card chat-tool-card--call${done ? ' chat-tool-card--done' : ''}${expanded ? ' chat-tool-card--expanded' : ' chat-tool-card--collapsed'}`}
+      className={`chat-tool-card chat-tool-card--call${done ? ' chat-tool-card--done' : ' chat-tool-card--running'}${expanded ? ' chat-tool-card--expanded' : ' chat-tool-card--collapsed'}`}
     >
       <button
         type="button"
@@ -196,24 +350,39 @@ function ChatToolCard({ tc }: { tc: ChatToolCallItem }) {
         aria-label={expanded ? `收起 ${tc.tool_name}` : `展开 ${tc.tool_name}`}
       >
         <span className="chat-tool-card__chevron" aria-hidden />
-        <span className="chat-tool-card__badge">工具调用</span>
-        <span className="chat-tool-card__name">{tc.tool_name}</span>
+        <span className="chat-tool-card__kind" title="工具调用">
+          <ToolCallGlyph />
+        </span>
+        <span className="chat-tool-card__name" title={tc.tool_name}>
+          {tc.tool_name}
+        </span>
+        <span className="chat-tool-card__spacer" aria-hidden />
         {done ? (
-          <span className="chat-tool-card__badge chat-tool-card__badge--out">已完成</span>
+          <span className="chat-tool-card__status chat-tool-card__status--done">
+            <span className="chat-tool-card__status-dot" aria-hidden />
+            已完成
+          </span>
         ) : (
-          <span className="chat-tool-card__badge chat-tool-card__badge--pending">执行中</span>
+          <span className="chat-tool-card__status chat-tool-card__status--pending">
+            <span className="chat-tool-card__status-dot" aria-hidden />
+            执行中
+          </span>
         )}
-        {!expanded && !done ? (
-          <span className="chat-tool-card__head-hint">等待执行结果…</span>
-        ) : null}
       </button>
       <div className="chat-tool-card__panel" aria-hidden={!expanded}>
         <div className="chat-tool-card__panel-inner">
           <div className="chat-tool-card__body">
-            {argsText ? <pre className="chat-tool-card__args">{argsText}</pre> : null}
+            {argsText ? (
+              <div className="chat-tool-card__section">
+                <span className="chat-tool-card__section-label">调用参数</span>
+                <pre className="chat-tool-card__args">{argsText}</pre>
+              </div>
+            ) : null}
             {done ? (
-              <div className="chat-tool-card__result-block">
-                <span className="chat-tool-card__result-label">执行结果</span>
+              <div className="chat-tool-card__section">
+                <span className="chat-tool-card__section-label chat-tool-card__section-label--out">
+                  执行结果
+                </span>
                 <pre className="chat-tool-card__result">{resultText}</pre>
               </div>
             ) : (
@@ -251,9 +420,13 @@ export function ChatToolCallMessage({
           </div>
         ) : null}
         <div className="chat-tool-stack">
-          {toolCalls.map((tc) => (
-            <ChatToolCard key={tc.tool_id} tc={tc} />
-          ))}
+          {toolCalls.map((tc) =>
+            tc.tool_name === 'write_todos' ? (
+              <ChatTodoListCard key={tc.tool_id || `todos-${tc.tool_name}`} tc={tc} />
+            ) : (
+              <ChatToolCard key={tc.tool_id} tc={tc} />
+            ),
+          )}
         </div>
       </div>
     </div>
