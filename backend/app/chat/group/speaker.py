@@ -16,6 +16,7 @@ from app.harness.cache import (
     clear_speaker_agent_graph_cache,
     evict_speaker_agent_graph_cache_for_agent_ids,
 )
+from app.sandbox import container_workspace_path
 from langchain.agents.middleware import ModelRequest
 from langchain.agents.middleware.types import dynamic_prompt
 from langgraph.graph.state import CompiledStateGraph
@@ -55,7 +56,7 @@ BASE_RULE = """
 - 用户意图不明确，需要向用户收集信息
 - 询问用户问题
 
-### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则: /workspace/member_id/session_id/round_id)
+### 文件产出目录(需要生成文件时，请将文件产出到该目录下；Docker 沙箱会话级工作目录)
 {output_dir}
 
 </base_rule>
@@ -114,9 +115,6 @@ class SpeakContext:
     group_members: list[dict]
     speaker_prompt: str
 
-artifact_dir = "/workspace" # 产物目录
-
-
 @dynamic_prompt
 def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
     """动态更改提示词"""
@@ -157,10 +155,7 @@ def format_wrap_prompt(request: ModelRequest[SpeakContext]) -> str:
         history_messages_text += f"</history_messages>\n"
         history_messages_text = history_messages_text.strip()    
 
-    
-
-    member_id = user_profile.get("member_id", "") if user_profile else ""
-    output_dir =  f"{artifact_dir}/{member_id}/{ctx.get('session_id', '')}/{ctx.get('round_id', '')}"
+    output_dir = container_workspace_path(request.runtime)
 
     scene_description_prompt = SCENE_DESCRIPTION.format(user_message=ctx.get("user_message", ""),
                                           transcript=history_messages_text,

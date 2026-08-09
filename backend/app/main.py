@@ -73,9 +73,13 @@ async def lifespan(app: FastAPI):
     )
 
     await start_skill_cache_invalidation_listener()
+    from app.sandbox import start_sandbox_idle_reaper, stop_sandbox_idle_reaper
+
+    await start_sandbox_idle_reaper()
     try:
         yield
     finally:
+        await stop_sandbox_idle_reaper()
         await stop_skill_cache_invalidation_listener()
         await close_mcp()
         await close_redis()

@@ -193,11 +193,6 @@ class DockerSandboxBackend(BaseSandbox):
         return responses
 
 
-def container_workspace_path(runtime: Any) -> str:
-    """容器内当前轮次产物目录（与宿主机 `.../session_id/round_id` 对应）。"""
-    ctx = getattr(runtime, "context", None) or {}
-    if isinstance(ctx, dict):
-        round_id = str(ctx.get("round_id", "") or "")
-        if round_id:
-            return f"/workspace/{round_id}"
+def container_workspace_path(runtime: Any = None) -> str:
+    """容器内会话级产物目录（挂载宿主 `workspace/{user}/{session}`）。"""
     return "/workspace"

@@ -1,4 +1,4 @@
-"""按会话（session）复用 Docker 沙箱容器；轮次（round）仅使用子目录，不重复建容器。"""
+"""按会话（session）复用 Docker 沙箱容器；工作目录固定为会话根 /workspace。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.config import _BACKEND_ROOT
 from app.sandbox.config import DEFAULT_SANDBOX_CONFIG, SandboxConfig
 from app.sandbox.docker_backend import DockerSandboxBackend
 
 logger = logging.getLogger(__name__)
+
+_CONTAINER_WORKDIR = "/workspace"
+# 与 skill_materializer.skill_cache_virtual_path 对齐：/.uploads/skills/{id}/
+_CONTAINER_SKILLS_MOUNT = "/.uploads/skills"
+_HOST_SKILLS_ROOT = (_BACKEND_ROOT / ".uploads" / "skills").resolve()
 
 _manager: DockerSandboxManager | None = None
 _manager_lock = threading.Lock()
@@ -23,6 +29,7 @@ _manager_lock = threading.Lock()
 class _SessionSandbox:
     container_id: str
     last_used: float
+    backend: DockerSandboxBackend
 
 
 class DockerSandboxManager:
@@ -30,11 +37,11 @@ class DockerSandboxManager:
 
     宿主机布局（与 `workspace_files` API 一致）::
 
-        workspace/{user_id}/{session_id}/{round_id}/...
+        workspace/{user_id}/{session_id}/...
 
     容器内::
 
-        /workspace/{round_id}/...   # 与宿主机子目录一一对应
+        /workspace/...   # 会话级工作目录，不随 round 切换
 
     释放容器（``release_session`` / 空闲超时）**不会**删除宿主机 workspace 文件；
     工作空间侧栏仍通过 ``workspace_files`` API 读取磁盘目录。
@@ -45,8 +52,10 @@ class DockerSandboxManager:
         self._image = cfg.image
         self._artifact_root = cfg.artifact_root
         self._network_disabled = cfg.network_disabled
+        self._read_only_root = cfg.read_only_root
         self._default_timeout = cfg.default_timeout
         self._idle_ttl_seconds = max(0, int(cfg.idle_ttl_seconds))
+        self._idle_cleanup_interval_seconds = max(0, int(cfg.idle_cleanup_interval_seconds))
         self._sessions: dict[str, _SessionSandbox] = {}
         self._lock = threading.Lock()
 
@@ -66,55 +75,52 @@ class DockerSandboxManager:
     def host_round_workspace(
         self, user_id: int | str, session_id: str, round_id: str
     ) -> Path:
-        """宿主机本轮目录，对应 API 下的 `{round_id}/...`。"""
-        root = self.host_session_workspace(user_id, session_id) / str(round_id)
-        root.mkdir(parents=True, exist_ok=True)
-        return root.resolve()
+        """兼容旧 API：现等价于宿主机会话根目录（不再按 round 分子目录）。"""
+        return self.host_session_workspace(user_id, session_id)
+
+    @staticmethod
+    def container_session_workspace() -> str:
+        """容器内会话级工作目录。"""
+        return _CONTAINER_WORKDIR
 
     @staticmethod
     def container_round_workspace(round_id: str) -> str:
-        """容器内本轮工作目录（挂载会话根后的子路径）。"""
-        return f"/workspace/{round_id}"
+        """兼容旧 API：现等价于会话级 `/workspace`。"""
+        return _CONTAINER_WORKDIR
 
     def acquire(
         self,
         user_id: int | str,
         session_id: str,
-        round_id: str,
+        round_id: str | None = None,
     ) -> DockerSandboxBackend:
-        """获取（或创建）会话级容器，并将 execute 工作目录设为当前 round 子目录。"""
-        if not session_id or not round_id:
-            raise ValueError("session_id and round_id are required")
+        """获取（或创建）会话级容器；工作目录固定为 `/workspace`。"""
+        if not session_id:
+            raise ValueError("session_id is required")
 
-        self.host_round_workspace(user_id, session_id, round_id)
-        workdir = self.container_round_workspace(round_id)
+        host_session = self.host_session_workspace(user_id, session_id)
         key = self._session_key(user_id, session_id)
         now = time.monotonic()
 
         with self._lock:
-            self._cleanup_idle_locked(now)
-
+            # 热路径不做 docker inspect；空闲/死容器由后台 reaper 清理
             entry = self._sessions.get(key)
-            if entry and self._is_running(entry.container_id):
+            if entry is not None:
                 entry.last_used = now
-                return DockerSandboxBackend(
-                    entry.container_id,
-                    workdir=workdir,
-                    default_timeout=self._default_timeout,
-                )
+                return entry.backend
 
-            if entry:
-                self._remove_container(entry.container_id)
-                self._sessions.pop(key, None)
-
-            host_session = self.host_session_workspace(user_id, session_id)
             container_id = self._create_container(session_id, host_session)
-            self._sessions[key] = _SessionSandbox(container_id=container_id, last_used=now)
-            return DockerSandboxBackend(
+            backend = DockerSandboxBackend(
                 container_id,
-                workdir=workdir,
+                workdir=_CONTAINER_WORKDIR,
                 default_timeout=self._default_timeout,
             )
+            self._sessions[key] = _SessionSandbox(
+                container_id=container_id,
+                last_used=now,
+                backend=backend,
+            )
+            return backend
 
     def touch_session(self, user_id: int | str, session_id: str) -> None:
         """刷新会话容器的最近使用时间（例如仅浏览工作空间、续聊前可调用）。"""
@@ -126,7 +132,7 @@ class DockerSandboxManager:
                 entry.last_used = now
 
     def cleanup_idle(self) -> int:
-        """主动清理空闲超时的会话容器，返回释放数量。"""
+        """清理空闲超时或已停止的会话容器（供定时 reaper / 主动调用），返回释放数量。"""
         with self._lock:
             return self._cleanup_idle_locked(time.monotonic())
 
@@ -148,14 +154,13 @@ class DockerSandboxManager:
         self.release_round(user_id, session_id, round_id)
 
     def _cleanup_idle_locked(self, now: float) -> int:
-        if self._idle_ttl_seconds <= 0:
-            return 0
-
         expired: list[str] = []
         for key, entry in self._sessions.items():
-            if now - entry.last_used >= self._idle_ttl_seconds:
-                expired.append(key)
-            elif not self._is_running(entry.container_id):
+            idle_too_long = (
+                self._idle_ttl_seconds > 0
+                and now - entry.last_used >= self._idle_ttl_seconds
+            )
+            if idle_too_long or not self._is_running(entry.container_id):
                 expired.append(key)
 
         for key in expired:
@@ -181,6 +186,9 @@ class DockerSandboxManager:
         name = self._container_name(session_id)
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
+        # 技能缓存只读挂载，供 SkillsMiddleware / 文件工具按虚拟路径读取
+        _HOST_SKILLS_ROOT.mkdir(parents=True, exist_ok=True)
+
         cmd = [
             "docker",
             "run",
@@ -189,9 +197,20 @@ class DockerSandboxManager:
             name,
             "-v",
             f"{host_session_workspace}:/workspace:rw",
+            "-v",
+            f"{_HOST_SKILLS_ROOT}:{_CONTAINER_SKILLS_MOUNT}:ro",
             "-w",
-            "/workspace",
+            _CONTAINER_WORKDIR,
         ]
+        if self._read_only_root:
+            # 根 FS 只读；会话产物写 /workspace，临时文件写 /tmp
+            cmd.extend(
+                [
+                    "--read-only",
+                    "--tmpfs",
+                    "/tmp:rw,nosuid,nodev,size=256m",
+                ]
+            )
         if self._network_disabled:
             cmd.extend(["--network", "none"])
         cmd.extend([self._image, "sleep", "infinity"])
@@ -201,13 +220,17 @@ class DockerSandboxManager:
             err = (proc.stderr or proc.stdout or "unknown error").strip()
             raise RuntimeError(f"Failed to create sandbox container: {err}")
 
-        inspect = subprocess.run(
-            ["docker", "inspect", "-f", "{{.Id}}", name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        container_id = inspect.stdout.strip()
+        # docker run -d 成功时 stdout 即为容器 ID
+        container_id = (proc.stdout or "").strip()
+        if not container_id:
+            inspect = subprocess.run(
+                ["docker", "inspect", "-f", "{{.Id}}", name],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            container_id = inspect.stdout.strip()
+
         logger.info(
             "Docker sandbox started (session-scoped) name=%s id=%s host=%s",
             name,
@@ -235,7 +258,6 @@ def make_docker_backend(runtime: Any, config: SandboxConfig | None = None) -> Do
     ctx = runtime.context or {}
     user_id = ctx.get("user_id") or ctx.get("member_id") or 0
     session_id = str(ctx.get("session_id", ""))
-    round_id = str(ctx.get("round_id", ""))
-    if not session_id or not round_id:
-        raise ValueError("session_id and round_id are required for Docker sandbox backend")
-    return get_sandbox_manager(config).acquire(user_id, session_id, round_id)
+    if not session_id:
+        raise ValueError("session_id is required for Docker sandbox backend")
+    return get_sandbox_manager(config).acquire(user_id, session_id)

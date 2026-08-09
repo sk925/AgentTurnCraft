@@ -6,6 +6,7 @@
 from app.sandbox.config import DEFAULT_SANDBOX_CONFIG, SandboxConfig
 from app.sandbox.docker_backend import DockerSandboxBackend, container_workspace_path
 from app.sandbox.manager import DockerSandboxManager, get_sandbox_manager, make_docker_backend
+from app.sandbox.reaper import start_sandbox_idle_reaper, stop_sandbox_idle_reaper
 
 __all__ = [
     "DEFAULT_SANDBOX_CONFIG",
@@ -15,4 +16,6 @@ __all__ = [
     "container_workspace_path",
     "get_sandbox_manager",
     "make_docker_backend",
+    "start_sandbox_idle_reaper",
+    "stop_sandbox_idle_reaper",
 ]

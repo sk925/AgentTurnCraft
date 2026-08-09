@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from app.sandbox import make_docker_backend
 from deepagents import create_deep_agent
 from langgraph.graph.state import CompiledStateGraph
 
@@ -66,7 +67,7 @@ class AgentRuntime:
                 middleware=list(config.middleware),
                 context_schema=config.context_schema,
                 checkpointer=config.checkpointer,
-                backend=make_project_backend,
+                backend=make_docker_backend,
             )
             put_cached_graph(config, skill_ids, compiled_graph)
             logger.info(

@@ -9,13 +9,12 @@ from app.chat.shared.streaming import stream_messages, stream_updates
 from app.config import settings
 from app.exceptions import AppException
 from app.harness import AgentBuildConfig, AgentRuntime, AgentRuntimeMode
+from app.sandbox import container_workspace_path
 from fastapi import status
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
 from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
-
-artifact_dir = "/workspace" # 产物目录
 
 BASE_RULE = """
 <base_rule>
@@ -54,7 +53,7 @@ BASE_RULE = """
 
 {knowledge_base_rule}
 
-### 文件产出目录(需要生成文件时，请将文件产出到该目录下.规则: /workspace/member_id/session_id/round_id)
+### 文件产出目录(需要生成文件时，请将文件产出到该目录下；Docker 沙箱会话级工作目录)
 {output_dir}
 
 </base_rule>
@@ -93,10 +92,7 @@ class SingleChatContext(TypedDict, total=False):
 def wrap_dynamic_prompt(request: ModelRequest) -> str:
     deep_agent_prompt = request.system_prompt or ""
     ctx = request.runtime.context or {}
-    member_id = ctx.get("user_id", "")
-    session_id = ctx.get("session_id", "")
-    round_id = ctx.get("round_id", "")
-    output_dir = f"{artifact_dir}/{member_id}/{session_id}/{round_id}"
+    output_dir = container_workspace_path(request.runtime)
     knowledge_base_rule = KNOWLEDGE_BASE_RULE if ctx.get("has_knowledge_bases") else KNOWLEDGE_BASE_RULE_EMPTY
     search_rule = "### 优先使用 search_knowledge 工具从知识库查询" if ctx.get("has_knowledge_bases") else ""
     base_rule_prompt = BASE_RULE.format(output_dir=output_dir, knowledge_base_rule=knowledge_base_rule)

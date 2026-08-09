@@ -4,22 +4,24 @@
 
 | 粒度 | 行为 |
 |------|------|
-| **session** | 一个 Docker 容器，只创建一次 |
-| **round** | 仅使用子目录，不新建容器 |
+| **session** | 一个 Docker 容器，只创建一次；工作目录固定 `/workspace` |
+| **round** | 不再切换工作目录；产物写入同一会话根目录 |
 
 ```
 宿主机（工作空间 API 直接读这里）
   workspace/{user_id}/{session_id}/
-    {round_id}/file.txt
-    {round_id_2}/out.md
+    file.txt
+    out.md
 
 容器（同一会话复用）
-  挂载: host .../session_id  →  /workspace
-  第 1 轮 workdir: /workspace/{round_id_1}
-  第 2 轮 workdir: /workspace/{round_id_2}   # 同一容器，换子目录
+  挂载: host .../session_id           →  /workspace          (rw)
+  挂载: host .../.uploads/skills      →  /.uploads/skills    (ro，技能包)
+  workdir: /workspace   # 全程固定，不随 round 变化
 ```
 
-因此 **可以正常拿到「工作空间」数据**：文件写在宿主机 `workspace/{member_id}/{session_id}/{round_id}/` 下，`GET /api/chat/workspace_files?session_id=...` 用 `rglob` 扫描该 session 目录，与是否用 Docker 无关。
+技能虚拟路径形如 `/.uploads/skills/{skill_id}/`，必须挂进容器，否则 `SkillsMiddleware` 扫不到技能。
+
+因此 **可以正常拿到「工作空间」数据**：文件写在宿主机 `workspace/{member_id}/{session_id}/` 下，`GET /api/chat/workspace_files?session_id=...` 用 `rglob` 扫描该 session 目录，与是否用 Docker 无关。
 
 ## 释放时机
 
@@ -31,13 +33,20 @@ manager.release_round(user_id, session_id, round_id)
 manager.release_session(user_id, session_id)
 ```
 
-## 空闲超时（默认开启）
+## 空闲超时与定时探活（默认开启）
 
 | 环境变量 | 默认 | 说明 |
 |----------|------|------|
-| `AGENT_SANDBOX_IDLE_TTL_SECONDS` | `86400`（24h） | 会话容器空闲超过该时间自动 `docker rm`；`0` 关闭 |
+| `AGENT_SANDBOX_READ_ONLY_ROOT` | `true` | 根文件系统只读；仅 `/workspace`（bind）与 `/tmp`（tmpfs）可写 |
+| `AGENT_SANDBOX_IDLE_TTL_SECONDS` | `86400`（24h） | 会话容器空闲超过该时间自动 `docker rm`；`0` 表示不按空闲超时释放 |
+| `AGENT_SANDBOX_IDLE_CLEANUP_INTERVAL_SECONDS` | `300`（5min） | 后台定时探活清理间隔；`0` 关闭定时任务 |
 
-- 每次 `acquire` 前会扫描并释放过期容器
+只读根不阻止**读取** `/usr`、`/etc` 等镜像目录，只阻止往根 FS 写入。已存在的旧容器不会自动带上新参数，需删会话容器或等空闲回收后重建。
+
+- **工具调用热路径**（`acquire`）：只复用/创建 backend，**不** `docker inspect`
+- **后台 reaper**（应用 lifespan 启动）：按间隔调用 `cleanup_idle()`
+  - `last_used` 超时 → 释放
+  - 或 `docker inspect` 发现已停止 → 释放
 - 也可主动调用 `get_sandbox_manager().cleanup_idle()`
 
 **只释放容器进程**，不删除 `workspace/{user_id}/{session_id}/` 下任何文件。
@@ -56,23 +65,19 @@ manager.release_session(user_id, session_id)
 
 ## 提示词中的产物路径
 
-接入沙箱时，请把 `output_dir` 设为 **当前 round 的容器路径**（不是 `/workspace` 根）：
+接入沙箱时，请把 `output_dir` 设为会话级容器路径：
 
 ```python
-from app.sandbox import container_workspace_path, DockerSandboxManager
+from app.sandbox import container_workspace_path
 
 # dynamic_prompt 内
-output_dir = container_workspace_path(request.runtime)
-# 或
-output_dir = DockerSandboxManager.container_round_workspace(round_id)
+output_dir = container_workspace_path()  # -> "/workspace"
 ```
-
-与现有非沙箱提示词对齐关系：
 
 | 模式 | output_dir |
 |------|------------|
-| LocalShell | `{artifact_dir}/{user}/{session}/{round}` 宿主机绝对路径 |
-| Docker 沙箱 | `/workspace/{round_id}` 容器路径 |
+| LocalShell | 视部署而定；当前提示词与沙箱对齐为 `/workspace` |
+| Docker 沙箱 | `/workspace`（会话根） |
 
 ## 环境变量
 
@@ -82,3 +87,4 @@ output_dir = DockerSandboxManager.container_round_workspace(round_id)
 
 - 自定义工具 `FileParser` / `web_search` / `fetch_webpage` 仍在宿主机执行，不受容器隔离。
 - `network_disabled=true` 时容器内无网；搜索类工具需留在宿主机工具列表。
+- 同会话多轮产物共用 `/workspace`，注意同名文件可能覆盖。
