@@ -25,3 +25,4 @@ class PermissionMenu(str, Enum):
     group_management = "群组"
     chat = "对话"
     group_chat = "群聊"
+    image_chat = "文生图"

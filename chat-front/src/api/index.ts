@@ -324,7 +324,7 @@ export interface UploadFileRecord {
   preview_url?: string | null;
 }
 
-export type SessionType = 'group' | 'ppt' | 'chat';
+export type SessionType = 'group' | 'ppt' | 'chat' | 'image_gen';
 
 export interface WorkspaceArtifactFile {
   name: string;
@@ -344,10 +344,15 @@ export interface ChatSession {
 }
 
 /** 后端 `session_type` → 前端聊天路由（用于侧栏点击与 URL 对齐） */
-export function chatPathForSessionType(sessionType: string | undefined | null): '/chat' | '/group-chat' {
+export function chatPathForSessionType(
+  sessionType: string | undefined | null,
+): '/chat' | '/group-chat' | '/image-chat' {
   const t = String(sessionType ?? 'chat').toLowerCase();
   if (t === 'group' || t === 'group_chat') {
     return '/group-chat';
+  }
+  if (t === 'image_gen' || t === 'image' || t === 'image_chat') {
+    return '/image-chat';
   }
   return '/chat';
 }
@@ -483,6 +488,29 @@ export interface ChatSpeakerToolOutEvent {
   content: string;
 }
 
+export interface ChatImageAsset {
+  url: string;
+  file_name?: string;
+  file_type?: string;
+}
+
+/** 文生图：开始生成 */
+export interface ChatImageGeneratingEvent {
+  event: 'image_generating';
+  speaker_id: number;
+  speaker_name: string;
+  prompt?: string;
+}
+
+/** 文生图：生成完成 */
+export interface ChatImageGeneratedEvent {
+  event: 'image_generated';
+  speaker_id: number;
+  speaker_name: string;
+  prompt?: string;
+  images: ChatImageAsset[];
+}
+
 export type ChatWindowEvent =
   | ChatStartEvent
   | ChatFinishedEvent
@@ -495,7 +523,9 @@ export type ChatWindowEvent =
   | ChatSpeakerInterruptEvent
   | ChatMainInterruptEvent
   | ChatSpeakerToolCallEvent
-  | ChatSpeakerToolOutEvent;
+  | ChatSpeakerToolOutEvent
+  | ChatImageGeneratingEvent
+  | ChatImageGeneratedEvent;
 
 function parseSSEChunk(chunk: string): ChatWindowEvent[] {
   const events: ChatWindowEvent[] = [];

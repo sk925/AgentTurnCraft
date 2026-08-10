@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     speaker_model_api_key: str
 
     default_single_agent_id: int
+    # 文生图默认智能体（agents 表 id；未配置时须由前端传 single_agent_id）
+    default_image_agent_id: int | None = None
 
     # 单聊上下文滚动摘要（轮次结束后压缩 checkpoint；未配置模型时复用 agent_selector）
     summary_enabled: bool = True

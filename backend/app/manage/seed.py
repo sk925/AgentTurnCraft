@@ -24,6 +24,7 @@ def seed_if_empty(db: Session) -> None:
     db.commit()
 
     _ensure_menu_permissions(db)
+    _ensure_chat_menu_roles(db)
 
     admin_role_name = "admin"
     if db.scalar(select(Role.id).where(Role.name == admin_role_name)) is None:
@@ -69,6 +70,59 @@ def _ensure_menu_permissions(db: Session) -> None:
             )
     db.commit()
     _sync_admin_role_permissions(db)
+
+
+# 对话类菜单：角色名与 permission.code 一致（chat / group_chat / image_chat）
+_CHAT_MENU_ROLE_CODES = ("chat", "group_chat", "image_chat")
+
+
+def _ensure_chat_menu_roles(db: Session) -> None:
+    """补全对话类菜单角色；已有 chat 角色的用户自动获得新增的 image_chat 角色。"""
+    for code in _CHAT_MENU_ROLE_CODES:
+        perm = db.scalar(select(Permission).where(Permission.code == code))
+        if perm is None:
+            continue
+        role = db.scalars(
+            select(Role).where(Role.name == code).options(selectinload(Role.permissions))
+        ).one_or_none()
+        if role is None:
+            menu = next((m for m in PermissionMenu if m.name == code), None)
+            role = Role(
+                name=code,
+                description=menu.value if menu else code,
+                role_type=RESOURCE_TYPE_BUILTIN,
+                permissions=[perm],
+            )
+            db.add(role)
+        else:
+            have_ids = {p.id for p in role.permissions}
+            if perm.id not in have_ids:
+                role.permissions = list(role.permissions) + [perm]
+    db.commit()
+
+    image_role = db.scalars(select(Role).where(Role.name == "image_chat")).one_or_none()
+    if image_role is None:
+        return
+
+    # 已有「对话」角色的用户自动获得「文生图」，避免新菜单因缺权被侧栏隐藏
+    chat_users = (
+        db.scalars(
+            select(User)
+            .join(User.roles)
+            .where(Role.name == "chat")
+            .options(selectinload(User.roles))
+        )
+        .unique()
+        .all()
+    )
+    changed = False
+    for user in chat_users:
+        if any(r.name == "image_chat" for r in user.roles):
+            continue
+        user.roles = list(user.roles) + [image_role]
+        changed = True
+    if changed:
+        db.commit()
 
 
 def _sync_admin_role_permissions(db: Session) -> None:

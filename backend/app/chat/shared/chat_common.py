@@ -14,6 +14,7 @@ class SessionType(str, Enum):
     GROUP_CHAT = "group"
     PPT = "ppt"
     CHAT = "chat"
+    IMAGE_GEN = "image_gen"
 
 
 class RoleType(str, Enum):
@@ -35,6 +36,7 @@ class MsgType(str, Enum):
     TOOL_OUT = "tool_out"
     INTERACTIVE = "interactive"
     TODO_LIST = "todo_list"
+    IMAGE = "image"
 
 
 class InnerNode(str, Enum):
@@ -96,6 +98,10 @@ class WindowState(TypedDict, total=False):
     single_agent_id: int
     question_data: dict[str, Any]
     user_input: dict[str, Any]
+    # 文生图 LangGraph
+    agent_style_prompt: str
+    image_model_id: int
+    image_prompt: str | None
 
 
 class NoSpeakerError(Exception):

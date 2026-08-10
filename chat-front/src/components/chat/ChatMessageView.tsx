@@ -467,3 +467,59 @@ export function ChatAiMessage({
     </div>
   );
 }
+
+export type ChatGeneratedImage = {
+  url: string;
+  file_name?: string;
+};
+
+type ChatImageMessageProps = {
+  title: string;
+  images: ChatGeneratedImage[];
+  caption?: string;
+  showAvatar?: boolean;
+  animate?: boolean;
+  enterIndex?: number;
+};
+
+/** 文生图结果气泡 */
+export function ChatImageMessage({
+  title,
+  images,
+  caption,
+  showAvatar = true,
+  animate = true,
+  enterIndex = 0,
+}: ChatImageMessageProps) {
+  return (
+    <div
+      className={`chat-msg chat-msg--ai chat-msg--image${showAvatar ? '' : ' chat-msg--continued'}${animate ? ' chat-msg--enter' : ' chat-msg--settled'}`}
+      style={animate ? { animationDelay: `${Math.min(enterIndex, 12) * 40}ms` } : undefined}
+    >
+      <ChatAiAvatarSlot show={showAvatar} />
+      <div className="chat-msg__body">
+        {showAvatar ? (
+          <div className="chat-msg__header">
+            <span className="chat-msg__name">{title}</span>
+            <span className="chat-msg__status chat-msg__status--pulse" title="在线" />
+          </div>
+        ) : null}
+        <div className="chat-image-stack">
+          {images.map((img, idx) => (
+            <a
+              key={`${img.url}-${idx}`}
+              className="chat-image-card"
+              href={img.url}
+              target="_blank"
+              rel="noreferrer"
+              title={img.file_name || '查看原图'}
+            >
+              <img className="chat-image-card__img" src={img.url} alt={img.file_name || '生成图片'} />
+            </a>
+          ))}
+          {caption ? <p className="chat-image-stack__caption">{caption}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}

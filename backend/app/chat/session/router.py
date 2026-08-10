@@ -98,6 +98,32 @@ def _agent_log_row_to_chat_message(row: AgentLog, db: Session, member_id: int) -
     file_info = None
     if role == RoleType.USER.value:
         file_info = _build_user_file_info(db, member_id, row.file_list)
+    elif msg_type == MsgType.IMAGE.value:
+        try:
+            payload = json.loads(content) if content else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        if isinstance(payload, dict):
+            images = payload.get("images") or []
+            infos: list[ChatSessionMessageFileInfo] = []
+            if isinstance(images, list):
+                for i, img in enumerate(images):
+                    if not isinstance(img, dict):
+                        continue
+                    url = img.get("url")
+                    if not isinstance(url, str) or not url.strip():
+                        continue
+                    infos.append(
+                        ChatSessionMessageFileInfo(
+                            file_id=str(img.get("object_key") or i),
+                            file_name=str(img.get("file_name") or f"generated_{i + 1}.png"),
+                            file_url=url.strip(),
+                            file_type="image/png",
+                        )
+                    )
+            prompt = payload.get("prompt")
+            content = prompt if isinstance(prompt, str) else content
+            file_info = infos if infos else None
 
     return ChatSessionMessageResponse(
         role_type=role,

@@ -9,7 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 
-from app.chat.orchestration.state_builder import build_group_window_state, build_single_window_state
+from app.chat.orchestration.state_builder import build_group_window_state, build_image_window_state, build_single_window_state
 from app.chat.orchestration.window_request import WindowChatRequest
 from app.chat.shared.chat_common import SessionType, SpearkerRecord
 from app.chat.shared.event_publisher import EventPublisher
@@ -290,14 +290,115 @@ class SingleChatHandler:
                 await publisher.clear_active_round(session_id)
 
 
+class ImageGenChatHandler:
+    """文生图 LangGraph：chat_agent → 按需 generate_image。"""
+
+    def build(
+        self,
+        window_chat_request: WindowChatRequest,
+        db: Session,
+        checkpointer,
+    ) -> RoundContext:
+        return build_image_window_state(window_chat_request, db, checkpointer)
+
+    async def execute(
+        self,
+        window_chat_request: WindowChatRequest,
+        round_ctx: RoundContext,
+        publisher: EventPublisher,
+    ) -> None:
+        from langchain_core.messages import HumanMessage
+
+        window_graph = round_ctx.window_graph
+        if window_graph is None:
+            raise RuntimeError("文生图模式缺少 LangGraph 编译图")
+
+        window_state = round_ctx.window_state
+        config = round_ctx.config
+        session_id = str(window_state["session_id"])
+        round_id = str(window_state["round_id"])
+        user_message = (window_state.get("user_message") or "").strip()
+
+        await publisher.publish(
+            session_id,
+            round_id,
+            {
+                "event": "start",
+                "session_id": session_id,
+                "round_id": round_id,
+            },
+        )
+
+        stream_input: dict = {
+            "user_message": user_message,
+            "session_id": session_id,
+            "round_id": round_id,
+            "member_id": window_state.get("member_id"),
+            "user_profile": window_state.get("user_profile") or {},
+            "current_speaker": window_state.get("current_speaker") or {},
+            "agent_style_prompt": window_state.get("agent_style_prompt") or "",
+            "image_model_id": window_state.get("image_model_id"),
+            "image_prompt": None,
+            "messages": [HumanMessage(content=user_message)] if user_message else [],
+        }
+
+        round_failed = False
+        try:
+            async for chunk in window_graph.astream(
+                stream_input,
+                config=config,
+                stream_mode=["updates"],
+            ):
+                # 节点内部已通过 EventPublisher 推送流式/图片事件
+                if isinstance(chunk, tuple) and len(chunk) == 2:
+                    mode, data = chunk
+                elif isinstance(chunk, tuple) and len(chunk) == 3:
+                    _, mode, data = chunk
+                else:
+                    continue
+                if mode != "updates" or not isinstance(data, dict):
+                    continue
+                if data.get("__interrupt__"):
+                    await publisher.publish(
+                        session_id,
+                        round_id,
+                        {
+                            "event": "main_interrupt",
+                            "interrupt_data": data.get("__interrupt__")[0].value,
+                        },
+                    )
+        except Exception as e:
+            round_failed = True
+            logger.exception(
+                "文生图轮次失败 session_id=%s round_id=%s",
+                session_id,
+                round_id,
+            )
+            await publisher.publish(
+                session_id,
+                round_id,
+                {"event": "error", "message": getattr(e, "message", None) or str(e)},
+            )
+            raise
+        finally:
+            await publisher.set_round_status(
+                session_id,
+                round_id,
+                "failed" if round_failed else "completed",
+            )
+            await publisher.clear_active_round(session_id)
+
+
 _GROUP_HANDLER = GroupChatHandler()
 _SINGLE_HANDLER = SingleChatHandler()
+_IMAGE_GEN_HANDLER = ImageGenChatHandler()
 _DEFAULT_HANDLER = _SINGLE_HANDLER
 
 _CHAT_MODE_HANDLERS: dict[SessionType, ChatModeHandler] = {
     SessionType.GROUP_CHAT: _GROUP_HANDLER,
     SessionType.CHAT: _SINGLE_HANDLER,
     SessionType.PPT: _SINGLE_HANDLER,
+    SessionType.IMAGE_GEN: _IMAGE_GEN_HANDLER,
 }
 
 

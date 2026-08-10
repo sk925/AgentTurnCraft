@@ -103,3 +103,50 @@ def build_single_window_state(
 ) -> RoundContext:
     window_state, config = build_window_state_and_config(window_chat_request, db)
     return RoundContext(window_state=window_state, window_graph=None, config=config)
+
+
+def build_image_window_state(
+    window_chat_request: WindowChatRequest,
+    db: Session,
+    checkpointer,
+) -> RoundContext:
+    """文生图：对话 Agent + 按需生图 LangGraph。"""
+    from app.chat.base.models import AgentService
+    from app.chat.modes.image.image_graph import get_image_chat_graph
+    from app.config import settings
+    from app.model_manage.model_cat import ChatModel, ModelType
+
+    window_state, config = build_window_state_and_config(window_chat_request, db)
+
+    agent_id: int | None = None
+    if window_chat_request.single_agent_id is not None:
+        try:
+            agent_id = int(str(window_chat_request.single_agent_id).strip())
+        except (TypeError, ValueError):
+            agent_id = None
+    if agent_id is None and settings.default_image_agent_id is not None:
+        agent_id = int(settings.default_image_agent_id)
+    if agent_id is None:
+        raise HTTPException(status_code=400, detail="请选择文生图智能体")
+
+    agent_info = AgentService.get_agent_info_by_id(agent_id)
+    if agent_info is None:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    chat_model_id = agent_info.get("chat_model_id")
+    if chat_model_id is None:
+        raise HTTPException(status_code=400, detail="智能体未绑定文生图模型")
+
+    row = db.query(ChatModel).filter(ChatModel.id == int(chat_model_id)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="智能体绑定的模型不存在")
+    if (row.model_type or "").strip().lower() != ModelType.IMAGE_GENERATION.value:
+        raise HTTPException(status_code=400, detail="该智能体未绑定文生图模型")
+
+    window_state["single_agent_id"] = agent_id
+    window_state["current_speaker"] = {"id": agent_info["id"], "name": agent_info["name"]}
+    window_state["agent_style_prompt"] = agent_info.get("prompt") or ""
+    window_state["image_model_id"] = int(chat_model_id)
+    window_state["image_prompt"] = None
+
+    window_graph = get_image_chat_graph(checkpointer)
+    return RoundContext(window_state=window_state, window_graph=window_graph, config=config)

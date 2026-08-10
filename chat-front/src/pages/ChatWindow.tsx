@@ -59,12 +59,14 @@ import {
   goLoginPage,
   groupsApi,
   isUserLoggedIn,
+  modelManageApi,
   requestOpenLoginModal,
   sessionsApi,
   uploadFileApi,
 } from '../api';
 import type {
   Agent,
+  ChatModelOption,
   ChatWindowEvent,
   Group,
   SessionMessage,
@@ -78,10 +80,12 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePortalSessions } from '../PortalSessionsContext';
 import {
   ChatAiMessage,
+  ChatImageMessage,
   ChatThinkingIndicator,
   ChatToolCallMessage,
   ChatUserMessage,
   formatToolResult,
+  type ChatGeneratedImage,
 } from '../components/chat/ChatMessageView';
 import WorkspaceFilePreviewModal from '../components/chat/WorkspaceFilePreviewModal';
 import {
@@ -249,7 +253,7 @@ function UserAttachmentCard({
   );
 }
 
-type ChatMessageKind = 'user' | 'speaker' | 'tool_call';
+type ChatMessageKind = 'user' | 'speaker' | 'tool_call' | 'image';
 
 type ChatMessage = {
   id: string;
@@ -266,6 +270,8 @@ type ChatMessage = {
   attachments?: ChatAttachmentMeta[];
   /** 历史 tool_call */
   toolCalls?: SessionToolCallItem[];
+  /** 文生图结果 */
+  images?: ChatGeneratedImage[];
 };
 
 /** tool_out 合并到对应 tool_call 卡片（按 tool_id 匹配；可选限定 speaker） */
@@ -378,6 +384,30 @@ function sessionRecordsToChatMessages(records: SessionMessage[]): ChatMessage[] 
     }
 
     if (msgType === 'todo_list' || msgType === 'interactive') {
+      return;
+    }
+
+    if (msgType === 'image') {
+      const images =
+        record.file_info && record.file_info.length > 0
+          ? record.file_info.map((f) => ({
+              url: f.file_url,
+              file_name: f.file_name,
+            }))
+          : [];
+      if (images.length === 0) {
+        return;
+      }
+      messages.push({
+        id: `history-image-${index}`,
+        kind: 'image',
+        role: 'speaker',
+        title: speakerTitle,
+        content: record.message_content || '',
+        speakerId,
+        images,
+        animate: false,
+      });
       return;
     }
 
@@ -583,6 +613,7 @@ type ChatWindowPageProps = {
 export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageProps) {
   const memberId = getCurrentUserIdFromToken();
   const isGroupChat = sessionType === 'group';
+  const isImageGen = sessionType === 'image_gen';
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -601,8 +632,9 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(undefined);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [agentsReady, setAgentsReady] = useState(false);
-  /** 单聊指定智能体；undefined 表示使用服务端默认智能体 */
+  /** 单聊/文生图指定智能体；undefined 表示使用服务端默认智能体 */
   const [selectedAgentId, setSelectedAgentId] = useState<number | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceArtifactFile[]>([]);
@@ -764,9 +796,17 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     if (!submitting) {
       return false;
     }
+    if (isImageGen) {
+      const streaming = chatMessages.find((m) => m.streaming);
+      if (streaming && streaming.content.trim()) {
+        return false;
+      }
+      const lastNonUser = [...chatMessages].reverse().find((m) => m.kind !== 'user');
+      return lastNonUser?.kind !== 'image';
+    }
     const streaming = chatMessages.find((m) => m.streaming);
     return !streaming || !streaming.content.trim();
-  }, [submitting, chatMessages]);
+  }, [submitting, chatMessages, isImageGen]);
 
   const visibleGroupMembers = useMemo(() => {
     if (!isGroupChat) {
@@ -801,11 +841,12 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   const emptyChatDescription = useMemo(() => {
     if (sessionId) return '历史对话';
-    return isGroupChat ? '新建群聊' : '新建对话';
-  }, [isGroupChat, sessionId]);
+    if (isGroupChat) return '新建群聊';
+    if (isImageGen) return '描述你想生成的图片';
+    return '新建对话';
+  }, [isGroupChat, isImageGen, sessionId]);
 
-  // 切换”对话/群聊”模式时，若 URL 中没有显式 session_id，需要清空旧状态
-  // 否则可能保留旧 sessionId/messages，导致默认文案”看起来没生效”
+  // 切换对话模式时，若 URL 中没有显式 session_id，需要清空旧状态
   useEffect(() => {
     setSessionId(null);
     setRoundGroupMembers([]);
@@ -815,7 +856,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
     setMessages([]);
     setWorkspaceFiles([]);
     setPendingAttachments([]);
-  }, [isGroupChat]);
+  }, [sessionType]);
 
 
   useEffect(() => {
@@ -833,25 +874,55 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
   useEffect(() => {
     if (isGroupChat || !isUserLoggedIn()) {
       setAgents([]);
+      setChatModels([]);
       setAgentsReady(true);
       return;
     }
     setAgentsReady(false);
-    void agentsApi
-      .getAll()
-      .then((list) => setAgents(list))
+    void Promise.all([agentsApi.getAll(), modelManageApi.listChatModels()])
+      .then(([list, models]) => {
+        setAgents(list);
+        setChatModels(models);
+      })
       .catch((error: unknown) => {
         message.error(getBackendErrorMessage(error, '加载智能体列表失败'));
         setAgents([]);
+        setChatModels([]);
       })
       .finally(() => setAgentsReady(true));
-  }, [isGroupChat]);
+  }, [isGroupChat, isImageGen]);
 
   const chatAgentOptions = useMemo(() => {
+    const modelTypeById = new Map(
+      chatModels.map((m) => [String(m.id), String(m.model_type ?? '').toLowerCase()]),
+    );
+    const wantType = isImageGen ? 'image_generation' : 'text_generation';
     return agents
-      .filter((a) => a.chat_model_id != null && String(a.chat_model_id).trim() !== '')
+      .filter((a) => {
+        const mid = a.chat_model_id != null ? String(a.chat_model_id).trim() : '';
+        if (!mid) {
+          return false;
+        }
+        const mt = modelTypeById.get(mid);
+        // 模型列表未加载完时暂不过滤；已加载则按类型匹配
+        if (chatModels.length === 0) {
+          return true;
+        }
+        // 单聊：兼容未标注类型或旧数据（仅排除明确的文生图模型）
+        if (!isImageGen) {
+          return mt !== 'image_generation';
+        }
+        return mt === wantType;
+      })
       .map((a) => ({ label: a.name, value: a.id }));
-  }, [agents]);
+  }, [agents, chatModels, isImageGen]);
+
+  useEffect(() => {
+    if (!isImageGen || selectedAgentId != null || chatAgentOptions.length === 0) {
+      return;
+    }
+    setSelectedAgentId(chatAgentOptions[0].value);
+  }, [isImageGen, chatAgentOptions, selectedAgentId]);
 
   const appendMessage = (msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
@@ -1047,6 +1118,44 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         setMessages((prev) =>
           attachToolResultToMessages(prev, event.tool_id, result, event.speaker_id),
         );
+        break;
+      }
+      case 'image_generating': {
+        const activeSpeakerId = normalizeSpeakerId(event.speaker_id);
+        if (activeSpeakerId != null) {
+          setCurrentSpeaker({ id: activeSpeakerId, name: event.speaker_name ?? '' });
+        }
+        break;
+      }
+      case 'image_generated': {
+        const activeSpeakerId = normalizeSpeakerId(event.speaker_id);
+        if (activeSpeakerId != null) {
+          setCurrentSpeaker({ id: activeSpeakerId, name: event.speaker_name ?? '' });
+        }
+        const images = Array.isArray(event.images)
+          ? event.images
+              .filter((img) => img && typeof img.url === 'string' && img.url.trim())
+              .map((img) => ({
+                url: img.url.trim(),
+                file_name: img.file_name,
+              }))
+          : [];
+        if (images.length === 0) {
+          break;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `image-${event.speaker_id}-${Date.now()}`,
+            kind: 'image',
+            role: 'speaker',
+            title: event.speaker_name || '文生图',
+            content: event.prompt || '',
+            speakerId: event.speaker_id,
+            images,
+            animate: true,
+          },
+        ]);
         break;
       }
       case 'speaker_interrupt': {
@@ -1251,8 +1360,10 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   const sendMessage = () => {
     const text = input.trim();
-    const fileIds = pendingAttachments.filter((a) => !a.uploading).map((a) => a.id);
-    if (pendingAttachments.some((a) => a.uploading)) {
+    const fileIds = isImageGen
+      ? []
+      : pendingAttachments.filter((a) => !a.uploading).map((a) => a.id);
+    if (!isImageGen && pendingAttachments.some((a) => a.uploading)) {
       message.warning('请等待附件上传完成后再发送');
       return;
     }
@@ -1261,6 +1372,14 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
       return;
     }
     if ((!text && fileIds.length === 0) || submitting) {
+      return;
+    }
+    if (isImageGen && !text) {
+      message.warning('请输入图片描述');
+      return;
+    }
+    if (isImageGen && selectedAgentId == null && chatAgentOptions.length > 0) {
+      message.warning('请选择文生图智能体');
       return;
     }
     if (!isUserLoggedIn() || memberId == null) {
@@ -1375,7 +1494,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
 
   useEffect(() => {
     const selectedSessionId = searchParams.get('session_id');
-    const pathHere = location.pathname.startsWith('/group-chat') ? '/group-chat' : '/chat';
+    const pathHere = chatPathForSessionType(sessionType);
 
     if (!selectedSessionId) {
       // 未指定 session_id：视为”新建”，需要保证窗口干净
@@ -1459,7 +1578,16 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
         message.error(getBackendErrorMessage(error, '加载会话消息失败'));
       }
     })();
-  }, [searchParams, memberId, navigate, portalSessions, portalSessionsReady, location.pathname]);
+  }, [
+    searchParams,
+    memberId,
+    navigate,
+    portalSessions,
+    portalSessionsReady,
+    location.pathname,
+    sessionType,
+    isGroupChat,
+  ]);
 
   const handleComposerPodBlur = (e: FocusEvent<HTMLDivElement>) => {
     const next = e.relatedTarget as Node | null;
@@ -1525,11 +1653,13 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               placeholder={
                 !isUserLoggedIn()
                   ? '请先登录后再发送消息'
-                  : hasSelectedSession
-                    ? '发消息…'
-                    : isGroupChat
-                      ? '发送消息开始群聊'
-                      : '发送消息开始对话'
+                  : isImageGen
+                    ? '描述画面，例如：一间有着精致窗户的花店…'
+                    : hasSelectedSession
+                      ? '发消息…'
+                      : isGroupChat
+                        ? '发送消息开始群聊'
+                        : '发送消息开始对话'
               }
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleComposerKeyDown}
@@ -1541,32 +1671,40 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           </div>
           <div className="chat-composer__footer">
             <div className="chat-composer__capsule-tools">
-              <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
-                <span className="chat-composer__tooltip-anchor">
-                  {!isUserLoggedIn() || submitting || activeInterruptForm ? (
-                    <span
-                      className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
-                      aria-disabled
-                    >
-                      <PlusOutlined />
-                    </span>
-                  ) : (
-                    <label
-                      htmlFor={attachmentInputId}
-                      className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
-                    >
-                      {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
-                    </label>
-                  )}
-                </span>
-              </Tooltip>
+              {!isImageGen ? (
+                <Tooltip title={!isUserLoggedIn() ? '请先登录' : '上传附件'}>
+                  <span className="chat-composer__tooltip-anchor">
+                    {!isUserLoggedIn() || submitting || activeInterruptForm ? (
+                      <span
+                        className="chat-composer__icon-btn chat-composer__icon-btn--plus chat-composer__icon-btn--disabled"
+                        aria-disabled
+                      >
+                        <PlusOutlined />
+                      </span>
+                    ) : (
+                      <label
+                        htmlFor={attachmentInputId}
+                        className={`chat-composer__icon-btn chat-composer__icon-btn--plus${uploadingAttachment ? ' chat-composer__icon-btn--busy' : ''}`}
+                      >
+                        {uploadingAttachment ? <span className="chat-composer__spinner" /> : <PlusOutlined />}
+                      </label>
+                    )}
+                  </span>
+                </Tooltip>
+              ) : null}
               {!isGroupChat && (
                 <Select
                   className="chat-composer__agent-select"
-                  allowClear
+                  allowClear={!isImageGen}
                   showSearch
                   optionFilterProp="label"
-                  placeholder={agentsReady ? '默认智能体' : '加载智能体…'}
+                  placeholder={
+                    agentsReady
+                      ? isImageGen
+                        ? '选择文生图智能体'
+                        : '默认智能体'
+                      : '加载智能体…'
+                  }
                   loading={!agentsReady}
                   disabled={
                     !isUserLoggedIn() ||
@@ -1579,7 +1717,13 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                   options={chatAgentOptions}
                   popupMatchSelectWidth={false}
                   suffixIcon={<RobotOutlined className="chat-composer__agent-select-icon" />}
-                  notFoundContent={agentsReady ? '暂无已绑定模型的智能体' : null}
+                  notFoundContent={
+                    agentsReady
+                      ? isImageGen
+                        ? '暂无绑定文生图模型的智能体'
+                        : '暂无已绑定模型的智能体'
+                      : null
+                  }
                 />
               )}
             </div>
@@ -1620,7 +1764,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
           className={`chat-session-root${workspaceCollapsed ? ' chat-session-root--workspace-collapsed' : ''}`}
         >
           <Row
-            className={`chat-session-row chat-session-row--stretch${hasSelectedSession ? ' chat-session-row--has-workspace' : ''}`}
+            className={`chat-session-row chat-session-row--stretch${hasSelectedSession && !isImageGen ? ' chat-session-row--has-workspace' : ''}`}
             gutter={[0, 0]}
             align="stretch"
             style={{ flex: 1, minHeight: 0, width: '100%' }}
@@ -1678,27 +1822,33 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               </Col>
             )}
 
-            <Col xs={24} lg={isGroupChat ? 13 : 18} className="chat-session-col chat-session-col--dialog">
+            <Col
+              xs={24}
+              lg={isGroupChat ? 13 : isImageGen ? 24 : 18}
+              className="chat-session-col chat-session-col--dialog"
+            >
               <Card
                 className="portal-card chat-main-dialog-card"
                 variant="borderless"
-                title={isGroupChat ? '群聊对话' : '对话'}
+                title={isGroupChat ? '群聊对话' : isImageGen ? '文生图' : '对话'}
                 extra={
-                  <label className="chat-dialog-tool-toggle">
-                    <span className="chat-dialog-tool-toggle__label">显示工具调用</span>
-                    <Switch
-                      size="small"
-                      checked={showToolCalls}
-                      onChange={(checked) => {
-                        setShowToolCalls(checked);
-                        try {
-                          localStorage.setItem(SHOW_TOOL_CALLS_STORAGE_KEY, checked ? '1' : '0');
-                        } catch {
-                          /* ignore */
-                        }
-                      }}
-                    />
-                  </label>
+                  isImageGen ? null : (
+                    <label className="chat-dialog-tool-toggle">
+                      <span className="chat-dialog-tool-toggle__label">显示工具调用</span>
+                      <Switch
+                        size="small"
+                        checked={showToolCalls}
+                        onChange={(checked) => {
+                          setShowToolCalls(checked);
+                          try {
+                            localStorage.setItem(SHOW_TOOL_CALLS_STORAGE_KEY, checked ? '1' : '0');
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                      />
+                    </label>
+                  )
                 }
                 style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
               >
@@ -1766,6 +1916,19 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                               />
                             );
                           }
+                          if (item.kind === 'image') {
+                            return (
+                              <ChatImageMessage
+                                key={item.id}
+                                title={item.title}
+                                images={item.images ?? []}
+                                caption={item.content}
+                                showAvatar={showSpeakerAvatar}
+                                animate={item.animate !== false}
+                                enterIndex={index}
+                              />
+                            );
+                          }
                           return (
                             <ChatAiMessage
                               key={item.id}
@@ -1780,6 +1943,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
                         })}
                         {showThinking ? (
                           <ChatThinkingIndicator
+                            label={isImageGen ? '正在生成图片' : '正在思考'}
                             showAvatar={shouldShowSpeakerAvatarAfterPrevious(
                               chatMessages,
                               currentSpeakerId != null
@@ -1799,7 +1963,7 @@ export default function ChatWindowPage({ sessionType = 'chat' }: ChatWindowPageP
               </Card>
             </Col>
 
-            {hasSelectedSession && (
+            {hasSelectedSession && !isImageGen && (
               <aside
                 className={`chat-workspace-aside${workspaceCollapsed ? ' chat-workspace-aside--collapsed' : ''}`}
                 aria-label="工作空间"

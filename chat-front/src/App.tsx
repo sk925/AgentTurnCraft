@@ -4,6 +4,7 @@ import {
   DeleteOutlined,
   LogoutOutlined,
   MessageOutlined,
+  PictureOutlined,
   PlusOutlined,
   RobotOutlined,
   DatabaseOutlined,
@@ -52,11 +53,17 @@ const MENU_PATH_TO_PERMISSION: Record<string, string> = {
   '/groups': 'group_management',
   '/chat': 'chat',
   '/group-chat': 'group_chat',
+  '/image-chat': 'image_chat',
 };
+
+type ChatMenuKey = '/chat' | '/group-chat' | '/image-chat';
 
 function navSelectedKey(pathname: string): string {
   if (pathname.startsWith('/group-chat')) {
     return '/group-chat';
+  }
+  if (pathname.startsWith('/image-chat')) {
+    return '/image-chat';
   }
   if (pathname.startsWith('/agents')) {
     return '/agents';
@@ -73,12 +80,18 @@ function navSelectedKey(pathname: string): string {
   return pathname;
 }
 
-function sessionsMatchingChatMenu(sessionsList: ChatSession[], menuKey: '/chat' | '/group-chat'): ChatSession[] {
-  const wantGroup = menuKey === '/group-chat';
+function sessionsMatchingChatMenu(sessionsList: ChatSession[], menuKey: ChatMenuKey): ChatSession[] {
   return sessionsList.filter((s) => {
     const st = String(s.session_type ?? 'chat').toLowerCase();
     const isGroup = st === 'group' || st === 'group_chat';
-    return wantGroup ? isGroup : !isGroup;
+    const isImage = st === 'image_gen' || st === 'image' || st === 'image_chat';
+    if (menuKey === '/group-chat') {
+      return isGroup;
+    }
+    if (menuKey === '/image-chat') {
+      return isImage;
+    }
+    return !isGroup && !isImage;
   });
 }
 
@@ -137,10 +150,23 @@ function visibleSessionsForPath(pathname: string, sessionsList: ChatSession[]): 
   if (pathname.startsWith('/group-chat')) {
     return sessionsMatchingChatMenu(sessionsList, '/group-chat');
   }
+  if (pathname.startsWith('/image-chat')) {
+    return sessionsMatchingChatMenu(sessionsList, '/image-chat');
+  }
   if (pathname === '/' || pathname.startsWith('/chat')) {
     return sessionsMatchingChatMenu(sessionsList, '/chat');
   }
   return sessionsList;
+}
+
+function chatMenuKeyFromPath(pathname: string): ChatMenuKey {
+  if (pathname.startsWith('/group-chat')) {
+    return '/group-chat';
+  }
+  if (pathname.startsWith('/image-chat')) {
+    return '/image-chat';
+  }
+  return '/chat';
 }
 
 /** 未登录不可进入门户（主页及各业务页），统一跳转登录页 */
@@ -167,7 +193,8 @@ function AppLayout() {
   const isChatRoute =
     location.pathname === '/' ||
     location.pathname.startsWith('/chat') ||
-    location.pathname.startsWith('/group-chat');
+    location.pathname.startsWith('/group-chat') ||
+    location.pathname.startsWith('/image-chat');
 
   const menuItems = useMemo((): MenuProps['items'] => {
     const all: MenuProps['items'] = [
@@ -178,6 +205,7 @@ function AppLayout() {
       { key: '/groups', icon: <UsergroupAddOutlined />, label: '群组' },
       { key: '/chat', icon: <MessageOutlined />, label: '对话' },
       { key: '/group-chat', icon: <TeamOutlined />, label: '群聊' },
+      { key: '/image-chat', icon: <PictureOutlined />, label: '文生图' },
     ];
     if (!isUserLoggedIn()) {
       return [];
@@ -197,7 +225,7 @@ function AppLayout() {
   }, [myPermissionCodes, permissionsReady]);
 
   const handleMenuClick = async (key: string) => {
-    if (key !== '/chat' && key !== '/group-chat') {
+    if (key !== '/chat' && key !== '/group-chat' && key !== '/image-chat') {
       navigate(key);
       return;
     }
@@ -206,7 +234,7 @@ function AppLayout() {
       navigate(key);
       return;
     }
-    const menuKey = key === '/group-chat' ? '/group-chat' : '/chat';
+    const menuKey = chatMenuKeyFromPath(key);
     try {
       const targetSessions = sessionsMatchingChatMenu(sessions, menuKey);
       if (targetSessions.length > 0) {
@@ -368,9 +396,7 @@ function AppLayout() {
                 <button
                   type="button"
                   className="portal-sider-sessions__new"
-                  onClick={() =>
-                    navigate(location.pathname.startsWith('/group-chat') ? '/group-chat' : '/chat')
-                  }
+                  onClick={() => navigate(chatMenuKeyFromPath(location.pathname))}
                 >
                   <PlusOutlined />
                 </button>
@@ -387,11 +413,7 @@ function AppLayout() {
                       <ul className="portal-sider-sessions__group-list">
                         {group.items.map((s) => {
                           const sid = new URLSearchParams(location.search).get('session_id');
-                          const here: '/chat' | '/group-chat' = location.pathname.startsWith(
-                            '/group-chat',
-                          )
-                            ? '/group-chat'
-                            : '/chat';
+                          const here = chatMenuKeyFromPath(location.pathname);
                           const active =
                             sid === s.id && chatPathForSessionType(s.session_type) === here;
                           const displayTitle = (s.title || '未命名会话').trim();
@@ -504,6 +526,7 @@ function AppLayout() {
             <Route path="/groups" element={<GroupsPage />} />
             <Route path="/chat" element={<ChatWindowPage sessionType="chat" />} />
             <Route path="/group-chat" element={<ChatWindowPage sessionType="group" />} />
+            <Route path="/image-chat" element={<ChatWindowPage sessionType="image_gen" />} />
             <Route path="/" element={<ChatWindowPage sessionType="chat" />} />
           </Routes>
         </Content>
